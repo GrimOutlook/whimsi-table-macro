@@ -86,6 +86,7 @@ mod test {
             #[MsiTable]
             #[msitable(name = "Directory")]
             struct DirectoryDao {
+                #[msi_table(localizable)]
                 default_dir: DefaultDir,
                 #[msitable(primary_key, identifier(generated, package_unique))]
                 directory: DirectoryIdentifier,
@@ -97,20 +98,64 @@ mod test {
         let output = msi_tables::gen_tables_impl(input);
 
         let expected_output = quote! {
+            struct DirectoryIdentifier(whimsi_msi::types::identifier::Identifier);
+            impl whimsi_msi::types::identifier::ToIdentifier for DirectoryIdentifier {
+                fn to_identifier(&self) -> whimsi_msi::types::identifier::Identifier {
+                    self.0
+                }
+            }
+
+            #[derive(Debug, Clone, Default, PartialEq)]
+            pub(crate) struct DirectoryIdentifierGenerator {
+                count: usize,
+                // A reference to a vec of all used Identifiers that should not be generated again.
+                // These are all identifiers that inhabit a primary_key column.
+                used: std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>>,
+            }
+
+            impl $crate::types::helpers::id_generator::IdentifierGenerator for DirectoryIdentifierGenerator {
+                type IdentifierType = DirectoryIdentifier;
+
+                fn id_prefix(&self) -> &str {
+                    "DIRECTORY"
+                }
+
+                fn used(&self) -> &std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>> {
+                    &self.used
+                }
+
+                fn count(&self) -> usize {
+                    self.count
+                }
+
+                fn count_mut(&mut self) -> &mut usize {
+                    &mut self.count
+                }
+            }
+
+            impl From<std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>>> for DirectoryIdentifierGenerator {
+                fn from(value: std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>>) -> Self {
+                    let count = value.borrow().len();
+                    Self {
+                        used: value,
+                        count: 0,
+                    }
+                }
+            }
+
             struct DirectoryDao {
                 default_dir: DefaultDir,
                 directory: DirectoryIdentifier,
                 parent_directory: Option<DirectoryIdentifier>
             }
 
-            impl MsiTable for DirectoryDao {
-                fn primary_key_indices(&self) -> Vec<usize> {
-                    vec![1]
+            impl PrimaryIdentifier for DirectoryDao {
+                fn primary_identifier(&self) -> whimsi_msi::types::identifier::Identifier {
+                    directory.to_identifier()
                 }
+            }
 
-                fn primary_keys(&self) -> Vec<ColumnTypes> {
-                    vec![directory.into()]
-                }
+            impl MsiDao for DirectoryDao {
 
                 fn conflicts_with(&self, other: &Self) -> bool {
                     self.directory == other.directory
@@ -126,16 +171,26 @@ mod test {
                 }
             }
 
-            impl PrimaryIdentifier for DirectoryDao {
-                fn primary_identifier(&self) -> whimsi_msi::types::identifier::Identifier {
-                    directory.to_identifier()
-                }
+            struct DirectoryTable {
+                generator:
+                entries: Vec<DirectoryDao>
             }
 
-            struct DirectoryIdentifier(whimsi_msi::types::identifier::Identifier);
-            impl whimsi_msi::types::identifier::ToIdentifier for DirectoryIdentifier {
-                fn to_identifier(&self) -> whimsi_msi::types::identifier::Identifier {
-                    self.0
+            impl MsiTable for DirectoryTable {
+                fn primary_key_indices(&self) -> Vec<usize> {
+                    vec![1]
+                }
+
+                fn primary_keys(&self) -> Vec<ColumnTypes> {
+                    vec![directory.into()]
+                }
+
+                fn columns(&self) -> Vec<whimsi_msi::Column> {
+                    vec![
+                        whimsi_msi::Column::build("Directory").primary_key().id_string(DEFAULT_IDENTIFIER_MAX_LEN),
+                        whimsi_msi::Column::build("Directory_Parent").nullable().id_string(DEFAULT_IDENTIFIER_MAX_LEN),
+                        whimsi_msi::Column::build("DefaultDir").localizable().category(whimsi_msi::Category::DefaultDir).string(255),
+                    ]
                 }
             }
 
