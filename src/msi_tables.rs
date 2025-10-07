@@ -69,15 +69,6 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
         .take_struct()
         .expect("Generating an MSI table is only supported from a struct currently");
 
-    // The output of the macro will start out empty and we will add tokens as we parse the data
-    // provided.
-    let mut output_tokens = quote! {
-        use whimsi_lib::types::column::identifier::Identifier;
-        use whimsi_lib::types::column::identifier::ToIdentifier;
-        use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-        use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
-    };
-
     // Create the table-specific identifier if one should be made. These are made when a table has
     // a column with a type that implements `ToIdentifier` and the column is not marked as a
     // foreign key.
@@ -98,27 +89,13 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
             )
         });
 
-    if let Some(ref primary_identifier) = primary_identifier {
-        let primary_identifier_tokens =
-            generate_identifier_definition(&target_name, primary_identifier);
+    let identifier_tokens = if let Some(ref primary_identifier) = primary_identifier {
+        generate_identifier_tokens(&target_name, primary_identifier, table_span)
+    } else {
+        Default::default()
+    };
 
-        // If the primary identifier requires a generator, create that now.
-        let generator_tokens = if let Some(identifier_options) =
-            &primary_identifier.identifier_options
-            && identifier_options.generated
-        {
-            generate_identifier_generator_definition(&target_name, table_span)
-        } else {
-            TokenStream::default()
-        };
-        output_tokens = quote! {
-            #output_tokens
-            #primary_identifier_tokens
-            #generator_tokens
-        };
-    }
-
-    let dao_tokens = generate_dao_definition(
+    let dao_definition_tokens = generate_dao_definition(
         &target_name,
         table_span,
         primary_identifier,
@@ -126,13 +103,42 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
     );
 
     // Generate the DAO code.
-    output_tokens = quote! {
-        #output_tokens
-        #dao_tokens
+    let output_tokens = quote! {
+        use whimsi_lib::types::column::identifier::Identifier;
+        use whimsi_lib::types::column::identifier::ToIdentifier;
+        use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
+        use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
+
+        #identifier_tokens
+        #dao_definition_tokens
     };
 
     debug_println!("Macro output: \n{}", output_tokens.to_string());
     output_tokens
+}
+
+fn generate_identifier_tokens(
+    target_name: &str,
+    primary_identifier: &FieldInformation,
+    span: Span,
+) -> TokenStream {
+    let primary_identifier_impl_tokens =
+        generate_identifier_definition(target_name, primary_identifier);
+
+    // If the primary identifier requires a generator, create that now.
+    let identifier_generator_definition_tokens = if let Some(identifier_options) =
+        &primary_identifier.identifier_options
+        && identifier_options.generated
+    {
+        generate_identifier_generator_definition(target_name, span)
+    } else {
+        Default::default()
+    };
+
+    quote! {
+        #primary_identifier_impl_tokens
+        #identifier_generator_definition_tokens
+    }
 }
 
 fn generate_identifier_definition(
