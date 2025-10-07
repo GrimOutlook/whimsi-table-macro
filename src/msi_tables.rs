@@ -1,15 +1,21 @@
 use darling::{FromDeriveInput, FromField};
-use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
-use syn::{DeriveInput, punctuated::Punctuated};
+use debug_print::debug_println;
+use itertools::Itertools;
+use proc_macro2::{Span, TokenStream};
+use quote::{ToTokens, TokenStreamExt, quote};
+use syn::{DeriveInput, Field, Ident, punctuated::Punctuated, spanned::Spanned};
+
+use crate::constants::*;
+use crate::helper;
 
 #[derive(FromDeriveInput, Clone)]
 #[darling(attributes(msitable))]
 struct NewTableDef {
+    // Name of the defining struct
+    ident: syn::Ident,
     data: darling::ast::Data<(), FieldInformation>,
 
-    name: Option<String>,
-    primary_key: Option<bool>,
+    name: String,
 }
 
 #[derive(FromField, Clone)]
@@ -25,23 +31,12 @@ struct FieldInformation {
     primary_key: bool,
 
     // Denotes if the given field is an identifier.
-    #[darling(default)]
-    identifier: Option<IdentifierInformation>,
+    #[darling(default, rename = "identifier")]
+    identifier_options: Option<IdentifierInformation>,
 }
 
 #[derive(darling::FromMeta, FromField, Clone)]
 struct IdentifierInformation {
-    // Denotes that the data must only exist once in a package_unique column in the MSI.
-    //
-    // For example, if the identifier is in the Directory table's `Directory` column, it cannot
-    // exist in the `File` table's `File` column as well. It can only exist in one of these.
-    //
-    // TODO: Determine if this can be jetisoned. It seems like this is just an alias for
-    // `primary_key` && `identifier`. If I can find a counterexample this can stay but
-    // it should be removed otherwise.
-    #[darling(default)]
-    package_unique: bool,
-
     // Denotes if the given identifier should have a generator created for it.
     #[darling(default)]
     generated: bool,
@@ -51,10 +46,11 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
     let input = syn::parse2::<syn::DeriveInput>(input).unwrap();
     let new_table = NewTableDef::from_derive_input(&input).expect("Failed to parse derive input");
 
-    println!("Name: {:?}", new_table.name);
-    println!("Primary Key: {:?}", new_table.primary_key);
+    debug_println!("Base name recieved: {}", new_table.name);
+    let target_name = helper::capitalize(&new_table.name);
+
     let struct_data = new_table.data.take_struct().unwrap();
-    println!(
+    debug_println!(
         "Fields: {:?}",
         struct_data
             .fields
@@ -63,13 +59,144 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
             .collect::<Vec<_>>()
             .join(", ")
     );
-    for field in struct_data.fields {
-        println!("Ident: {:?}- Primary: {:?}", field.ident, field.primary_key);
-        if let Some(id) = field.identifier {
-            println!("Generated: {}", id.generated);
+    for field in struct_data.clone().fields {
+        let mut debug_msg = format!(
+            "Ident: [{:?}] - Primary: [{:?}]",
+            field.ident, field.primary_key
+        );
+        if let Some(id) = field.identifier_options {
+            debug_println!("Generated: {}", id.generated);
         }
     }
-    quote!()
+
+    // The output of the macro will start out empty and we will add tokens as we parse the data
+    // provided.
+    let mut output_tokens = quote! {
+        use whimsi_lib::types::column::identifier::Identifier;
+        use whimsi_lib::types::column::identifier::ToIdentifier;
+        use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
+        use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
+    };
+
+    // Create the table-specific identifier if one should be made. These are made when a table has
+    // a column with a type that implements `ToIdentifier` and the column is not marked as a
+    // foreign key.
+    let primary_identifier = struct_data
+        .clone()
+        .fields
+        .into_iter()
+        .filter(|f| f.primary_key && f.identifier_options.is_some())
+        .at_most_one()
+        .unwrap_or_else(|_| {
+            panic!(
+                "More than one primary identifier found in [{}] defintion. This is not supported.",
+                new_table.ident
+            )
+        });
+
+    if let Some(primary_identifier) = primary_identifier {
+        let primary_identifier_tokens =
+            generate_identifier_definition(&target_name, &primary_identifier);
+
+        // If the primary identifier requires a generator, create that now.
+        let generator_tokens = if let Some(identifier_options) =
+            primary_identifier.identifier_options
+            && identifier_options.generated
+        {
+            generate_identifier_generator_definition(&target_name, primary_identifier.ident.span())
+        } else {
+            TokenStream::default()
+        };
+        output_tokens = quote! {
+            #output_tokens
+            #primary_identifier_tokens
+            #generator_tokens
+        };
+    }
+
+    debug_println!("Macro output: \n{}", output_tokens.to_string());
+    output_tokens
+}
+
+fn generate_identifier_definition(
+    target_name: &str,
+    primary_identifier: &FieldInformation,
+) -> TokenStream {
+    let name = primary_identifier
+        .ident
+        .clone()
+        .unwrap_or_else(|| panic!("Identifier for target [{}] was None", target_name));
+    debug_println!(
+        "Primary identifier field for struct [{}]: {}",
+        target_name,
+        name
+    );
+
+    let new_identifier_ident = Ident::new(
+        &format!("{target_name}{IDENTIFIER_SUFFIX}"),
+        primary_identifier.ident.span(),
+    );
+
+    let identifier_comment = &format!(
+        "This is a simple wrapper around `Identifier` for the `{target_name}{TABLE_SUFFIX}`. \
+        Used to ensure that identifiers for the `{target_name}{TABLE_SUFFIX}` are only used in valid locations."
+    );
+    quote! {
+        #[doc = #identifier_comment]
+        pub struct #new_identifier_ident(Identifier);
+
+        impl ToIdentifier for #new_identifier_ident {
+            fn to_identifier(&self) -> Identifier {
+                self.0
+            }
+        }
+    }
+}
+
+fn generate_identifier_generator_definition(target_name: &str, span: Span) -> TokenStream {
+    let identifier_ident = Ident::new(&format!("{target_name}{IDENTIFIER_SUFFIX}"), span);
+    let identifier_generator_struct_ident =
+        Ident::new(&format!("{identifier_ident}{GENERATOR_SUFFIX}"), span);
+    let identifier_prefix = target_name.to_uppercase();
+    quote! {
+        #[derive(Debug, Clone, Default, PartialEq)]
+        pub(crate) struct #identifier_generator_struct_ident {
+            count: usize,
+            // A reference to a vec of all used Identifiers that should not be generated again.
+            // These are all identifiers that inhabit a primary_key column.
+            used: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>,
+        }
+
+        impl IdentifierGenerator for #identifier_generator_struct_ident {
+            type IdentifierType = #identifier_ident;
+
+            fn id_prefix(&self) -> &str {
+                #identifier_prefix
+            }
+
+            fn used(&self) -> &std::rc::Rc<std::cell::RefCell<Vec<Identifier>>> {
+                &self.used
+            }
+
+            fn count(&self) -> usize {
+                self.count
+            }
+
+            fn count_mut(&mut self) -> &mut usize {
+                &mut self.count
+            }
+        }
+
+        impl From<std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>> for #identifier_generator_struct_ident {
+            fn from(value: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>) -> Self {
+                let count = value.borrow().len();
+                Self {
+                    used: value,
+                    count: 0,
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -86,11 +213,11 @@ mod test {
             #[MsiTable]
             #[msitable(name = "Directory")]
             struct DirectoryDao {
-                #[msi_table(localizable)]
-                default_dir: DefaultDir,
-                #[msitable(primary_key, identifier(generated, package_unique))]
+                #[msitable(primary_key, identifier(generated))]
                 directory: DirectoryIdentifier,
                 parent_directory: Option<DirectoryIdentifier>,
+                #[msi_table(localizable)]
+                default_dir: DefaultDir,
             }
         };
 
@@ -103,7 +230,8 @@ mod test {
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
             use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
 
-            struct DirectoryIdentifier(Identifier);
+            #[doc = "This is a simple wrapper around `Identifier` for the `DirectoryTable`. Used to ensure that identifiers for the `DirectoryTable` are only used in valid locations."]
+            pub struct DirectoryIdentifier(Identifier);
             impl ToIdentifier for DirectoryIdentifier {
                 fn to_identifier(&self) -> Identifier {
                     self.0
@@ -149,9 +277,9 @@ mod test {
             }
 
             struct DirectoryDao {
-                default_dir: DefaultDir,
                 directory: DirectoryIdentifier,
-                parent_directory: Option<DirectoryIdentifier>
+                parent_directory: Option<DirectoryIdentifier>,
+                default_dir: DefaultDir,
             }
 
             impl PrimaryIdentifier for DirectoryDao {
@@ -176,8 +304,8 @@ mod test {
             }
 
             struct DirectoryTable {
-                generator:
-                entries: Vec<DirectoryDao>
+                generator: DirectoryIdentifierGenerator,
+                entries: Vec<DirectoryDao>,
             }
 
             impl MsiTable for DirectoryTable {
@@ -201,8 +329,10 @@ mod test {
         };
 
         // Compare the generated output with the expected output (e.g., using syn and comparing ASTs)
-        let parsed_output = syn::parse2::<syn::File>(output).unwrap();
-        let parsed_expected = syn::parse2::<syn::File>(expected_output).unwrap();
+        let parsed_output =
+            syn::parse2::<syn::File>(output).expect("Failed to parse output of test data");
+        let parsed_expected =
+            syn::parse2::<syn::File>(expected_output).expect("Failed to parse reference test data");
 
         assert_eq!(
             parsed_output.to_token_stream().to_string(),

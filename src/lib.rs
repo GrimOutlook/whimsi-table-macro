@@ -2,6 +2,8 @@ use syn::parse_macro_input;
 
 extern crate proc_macro;
 
+mod constants;
+mod helper;
 mod msi_tables;
 
 // NOTE: Objectives that this macro must handle:
