@@ -3,6 +3,8 @@ use debug_print::debug_println;
 use itertools::Itertools;
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, TokenStreamExt, quote};
+use syn::token::Token;
+use syn::{self, Fields};
 use syn::{DeriveInput, Field, Ident, punctuated::Punctuated, spanned::Spanned};
 
 use crate::constants::*;
@@ -33,6 +35,10 @@ struct FieldInformation {
     // Denotes if the given field is an identifier.
     #[darling(default, rename = "identifier")]
     identifier_options: Option<IdentifierInformation>,
+
+    // Whether or not the given field is localizable as specified in the MSI documentation.
+    #[darling(default)]
+    localizable: bool,
 }
 
 #[derive(darling::FromMeta, FromField, Clone)]
@@ -40,34 +46,28 @@ struct IdentifierInformation {
     // Denotes if the given identifier should have a generator created for it.
     #[darling(default)]
     generated: bool,
+
+    // Denotes if the given identifier is a foreign key into the table and if it is, what table the
+    // key is from.
+    #[darling(default)]
+    foreign_key: Option<String>,
 }
 
 pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
     let input = syn::parse2::<syn::DeriveInput>(input).unwrap();
     let new_table = NewTableDef::from_derive_input(&input).expect("Failed to parse derive input");
+    let table_span = new_table.ident.span();
 
-    debug_println!("Base name recieved: {}", new_table.name);
+    // Make sure the target name is capitalized. There are no cases where we want
+    // structs to be named in snake_case.
     let target_name = helper::capitalize(&new_table.name);
 
-    let struct_data = new_table.data.take_struct().unwrap();
-    debug_println!(
-        "Fields: {:?}",
-        struct_data
-            .fields
-            .iter()
-            .map(|f| f.ident.to_token_stream().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    for field in struct_data.clone().fields {
-        let mut debug_msg = format!(
-            "Ident: [{:?}] - Primary: [{:?}]",
-            field.ident, field.primary_key
-        );
-        if let Some(id) = field.identifier_options {
-            debug_println!("Generated: {}", id.generated);
-        }
-    }
+    // TODO: Determine if I should make this also able to take in an enum and if so, how to parse
+    // each table from each enum variant using the derive format.
+    let struct_data = new_table
+        .data
+        .take_struct()
+        .expect("Generating an MSI table is only supported from a struct currently");
 
     // The output of the macro will start out empty and we will add tokens as we parse the data
     // provided.
@@ -85,7 +85,11 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
         .clone()
         .fields
         .into_iter()
-        .filter(|f| f.primary_key && f.identifier_options.is_some())
+        .filter(|f| {
+            f.primary_key
+                && f.identifier_options.is_some()
+                && f.identifier_options.clone().unwrap().foreign_key.is_none()
+        })
         .at_most_one()
         .unwrap_or_else(|_| {
             panic!(
@@ -94,16 +98,16 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
             )
         });
 
-    if let Some(primary_identifier) = primary_identifier {
+    if let Some(ref primary_identifier) = primary_identifier {
         let primary_identifier_tokens =
-            generate_identifier_definition(&target_name, &primary_identifier);
+            generate_identifier_definition(&target_name, primary_identifier);
 
         // If the primary identifier requires a generator, create that now.
         let generator_tokens = if let Some(identifier_options) =
-            primary_identifier.identifier_options
+            &primary_identifier.identifier_options
             && identifier_options.generated
         {
-            generate_identifier_generator_definition(&target_name, primary_identifier.ident.span())
+            generate_identifier_generator_definition(&target_name, table_span)
         } else {
             TokenStream::default()
         };
@@ -113,6 +117,19 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
             #generator_tokens
         };
     }
+
+    let dao_tokens = generate_dao_definition(
+        &target_name,
+        table_span,
+        primary_identifier,
+        struct_data.fields.clone(),
+    );
+
+    // Generate the DAO code.
+    output_tokens = quote! {
+        #output_tokens
+        #dao_tokens
+    };
 
     debug_println!("Macro output: \n{}", output_tokens.to_string());
     output_tokens
@@ -199,6 +216,140 @@ fn generate_identifier_generator_definition(target_name: &str, span: Span) -> To
     }
 }
 
+fn generate_dao_definition(
+    target_name: &str,
+    span: Span,
+    primary_identifier: Option<FieldInformation>,
+    fields: Vec<FieldInformation>,
+) -> TokenStream {
+    let dao_struct_ident = Ident::new(&format!("{target_name}{DAO_SUFFIX}"), span);
+
+    let dao_struct_definition_tokens = generate_dao_struct_definition(&dao_struct_ident, &fields);
+    let primary_identifier_impl_definition_tokens =
+        generate_primary_identifier_impl_definition(primary_identifier, &dao_struct_ident);
+    let msi_dao_impl_definition_tokens =
+        generate_msi_dao_impl_definition(&dao_struct_ident, &fields);
+
+    quote! {
+        #dao_struct_definition_tokens
+        #primary_identifier_impl_definition_tokens
+        #msi_dao_impl_definition_tokens
+    }
+}
+
+fn generate_dao_struct_definition(
+    dao_struct_ident: &Ident,
+    fields: &Vec<FieldInformation>,
+) -> TokenStream {
+    // Pretty sure we could just append `fields` to the token stream for this but I want to
+    // explicitly drop visibilities here so all properties are private.
+    //
+    // TODO: This will _not_ propogate proc-macros placed on the fields. Determine if this is
+    // needed.
+    let mut field_tokens = TokenStream::new();
+    for field in fields {
+        let field_ident = field.ident.clone();
+        let field_type = field.ty.clone();
+        field_tokens = quote! {
+            #field_tokens
+            #field_ident : #field_type ,
+        }
+    }
+    quote! {
+        struct #dao_struct_ident {
+            #field_tokens
+        }
+    }
+}
+
+fn generate_primary_identifier_impl_definition(
+    primary_identifier: Option<FieldInformation>,
+    dao_struct_ident: &Ident,
+) -> TokenStream {
+    let dao_primary_identifier = match primary_identifier {
+        Some(identifier) => {
+            let identifier_ident = identifier.ident;
+            quote! {#identifier_ident.to_identifier()}
+        }
+        None => {
+            quote! { None }
+        }
+    };
+
+    quote! {
+        impl PrimaryIdentifier for #dao_struct_ident {
+            fn primary_identifier(&self) -> Identifier {
+                #dao_primary_identifier
+            }
+        }
+    }
+}
+
+fn generate_msi_dao_impl_definition(
+    dao_struct_ident: &Ident,
+    fields: &Vec<FieldInformation>,
+) -> TokenStream {
+    let conflicts_definition_tokens = generate_msi_dao_conflicts_definition(fields);
+    let to_row_definition_tokens = generate_msi_dao_to_row_definition(fields);
+
+    quote! {
+        impl MsiDao for #dao_struct_ident {
+
+            #conflicts_definition_tokens
+            #to_row_definition_tokens
+
+        }
+    }
+}
+
+fn generate_msi_dao_conflicts_definition(fields: &Vec<FieldInformation>) -> TokenStream {
+    let mut conflict_expression = TokenStream::new();
+    // Get the fields that are marked as primary_key as these are what is used to check for
+    // conflicts.
+    for field in fields {
+        if !field.primary_key {
+            continue;
+        }
+
+        let and_and = if !conflict_expression.is_empty() {
+            quote!(&&)
+        } else {
+            TokenStream::default()
+        };
+
+        let field_ident = &field.ident;
+        conflict_expression = quote! {
+            #conflict_expression
+            #and_and self.#field_ident == other.#field_ident
+        }
+    }
+
+    quote! {
+        fn conflicts_with(&self, other: &Self) -> bool {
+            #conflict_expression
+        }
+    }
+}
+
+fn generate_msi_dao_to_row_definition(fields: &Vec<FieldInformation>) -> TokenStream {
+    let mut fields_to_msi_value_tokens = TokenStream::new();
+    for field in fields {
+        let field_ident = &field.ident;
+        fields_to_msi_value_tokens = quote! {
+            #fields_to_msi_value_tokens
+            #field_ident.to_msi_value(),
+        }
+    }
+
+    quote! {
+        fn to_row(&self) -> Vec<whimsi_msi::Value> {
+            vec![
+                #fields_to_msi_value_tokens
+            ]
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -208,15 +359,16 @@ mod test {
     use quote::quote;
 
     #[test]
-    fn test_msi_table() {
+    fn test_msi_table_with_generated_identifier() {
         let input = quote! {
             #[MsiTable]
             #[msitable(name = "Directory")]
             struct DirectoryDao {
                 #[msitable(primary_key, identifier(generated))]
                 directory: DirectoryIdentifier,
+                #[msitable(identifier(foreign_key = "DirectoryTable"))]
                 parent_directory: Option<DirectoryIdentifier>,
-                #[msi_table(localizable)]
+                #[msitable(localizable)]
                 default_dir: DefaultDir,
             }
         };
@@ -296,9 +448,9 @@ mod test {
 
                 fn to_row(&self) -> Vec<whimsi_msi::Value> {
                     vec![
-                        default_dir.to_msi_value(),
                         directory.to_msi_value(),
                         parent_directory.to_msi_value(),
+                        default_dir.to_msi_value(),
                     ]
                 }
             }
@@ -320,7 +472,7 @@ mod test {
                 fn columns(&self) -> Vec<whimsi_msi::Column> {
                     vec![
                         whimsi_msi::Column::build("Directory").primary_key().id_string(DEFAULT_IDENTIFIER_MAX_LEN),
-                        whimsi_msi::Column::build("Directory_Parent").nullable().id_string(DEFAULT_IDENTIFIER_MAX_LEN),
+                        whimsi_msi::Column::build("Directory_Parent").nullable().foreign_key("Directory", 0).id_string(DEFAULT_IDENTIFIER_MAX_LEN),
                         whimsi_msi::Column::build("DefaultDir").localizable().category(whimsi_msi::Category::DefaultDir).string(255),
                     ]
                 }
