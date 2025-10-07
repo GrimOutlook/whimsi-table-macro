@@ -98,9 +98,14 @@ mod test {
         let output = msi_tables::gen_tables_impl(input);
 
         let expected_output = quote! {
-            struct DirectoryIdentifier(whimsi_msi::types::identifier::Identifier);
-            impl whimsi_msi::types::identifier::ToIdentifier for DirectoryIdentifier {
-                fn to_identifier(&self) -> whimsi_msi::types::identifier::Identifier {
+            use whimsi_lib::types::column::identifier::Identifier;
+            use whimsi_lib::types::column::identifier::ToIdentifier;
+            use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
+            use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
+
+            struct DirectoryIdentifier(Identifier);
+            impl ToIdentifier for DirectoryIdentifier {
+                fn to_identifier(&self) -> Identifier {
                     self.0
                 }
             }
@@ -110,17 +115,17 @@ mod test {
                 count: usize,
                 // A reference to a vec of all used Identifiers that should not be generated again.
                 // These are all identifiers that inhabit a primary_key column.
-                used: std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>>,
+                used: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>,
             }
 
-            impl $crate::types::helpers::id_generator::IdentifierGenerator for DirectoryIdentifierGenerator {
+            impl IdentifierGenerator for DirectoryIdentifierGenerator {
                 type IdentifierType = DirectoryIdentifier;
 
                 fn id_prefix(&self) -> &str {
                     "DIRECTORY"
                 }
 
-                fn used(&self) -> &std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>> {
+                fn used(&self) -> &std::rc::Rc<std::cell::RefCell<Vec<Identifier>>> {
                     &self.used
                 }
 
@@ -133,8 +138,8 @@ mod test {
                 }
             }
 
-            impl From<std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>>> for DirectoryIdentifierGenerator {
-                fn from(value: std::rc::Rc<std::cell::RefCell<Vec<$crate::types::column::identifier::Identifier>>>) -> Self {
+            impl From<std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>> for DirectoryIdentifierGenerator {
+                fn from(value: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>) -> Self {
                     let count = value.borrow().len();
                     Self {
                         used: value,
@@ -150,7 +155,7 @@ mod test {
             }
 
             impl PrimaryIdentifier for DirectoryDao {
-                fn primary_identifier(&self) -> whimsi_msi::types::identifier::Identifier {
+                fn primary_identifier(&self) -> Identifier {
                     directory.to_identifier()
                 }
             }
@@ -162,7 +167,6 @@ mod test {
                 }
 
                 fn to_row(&self) -> Vec<whimsi_msi::Value> {
-                    use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
                     vec![
                         default_dir.to_msi_value(),
                         directory.to_msi_value(),
