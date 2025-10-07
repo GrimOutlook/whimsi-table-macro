@@ -13,6 +13,7 @@ proc-macro2 = "1.0.101"
 darling = "0.21.3"
 itertools = "0.14.0"
 debug_print = "1.0.0"
+whimsi-msi = {path = "../whimsi/crates/msi/"}
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

@@ -10,3 +10,10 @@ pub fn capitalize(s: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
     }
 }
+
+pub fn snake_case_to_pascal_case(s: &str) -> String {
+    s.split("_")
+        .into_iter()
+        .map(|sub| capitalize(sub))
+        .collect()
+}
