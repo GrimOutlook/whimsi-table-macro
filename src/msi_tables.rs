@@ -532,7 +532,7 @@ fn generate_msi_table_impl(target_name: &str, fields: &[FieldInformation]) -> To
                 &self.entries
             }
 
-            fn entries_mut(&mut self) -> &Vec<#dao_name> {
+            fn entries_mut(&mut self) -> &mut Vec<#dao_name> {
                 &mut self.entries
             }
 
@@ -721,7 +721,7 @@ mod test {
                     &self.entries
                 }
 
-                fn entries_mut(&mut self) -> &Vec<DirectoryDao> {
+                fn entries_mut(&mut self) -> &mut Vec<DirectoryDao> {
                     &mut self.entries
                 }
 
@@ -817,7 +817,7 @@ mod test {
                     &self.entries
                 }
 
-                fn entries_mut(&mut self) -> &Vec<FeatureComponentDao> {
+                fn entries_mut(&mut self) -> &mut Vec<FeatureComponentDao> {
                     &mut self.entries
                 }
 
@@ -983,7 +983,7 @@ mod test {
                     &self.entries
                 }
 
-                fn entries_mut(&mut self) -> &Vec<DirectoryDao> {
+                fn entries_mut(&mut self) -> &mut Vec<DirectoryDao> {
                     &mut self.entries
                 }
                 fn primary_key_indices(&self) -> Vec<usize> {
@@ -1043,7 +1043,7 @@ mod test {
                     &self.entries
                 }
 
-                fn entries_mut(&mut self) -> &Vec<FeatureComponentDao> {
+                fn entries_mut(&mut self) -> &mut Vec<FeatureComponentDao> {
                     &mut self.entries
                 }
 
