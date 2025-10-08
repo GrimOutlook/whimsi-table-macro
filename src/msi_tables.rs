@@ -411,7 +411,7 @@ fn generate_msi_dao_to_row_definition(fields: &Vec<FieldInformation>) -> TokenSt
 
 fn generate_table_tokens(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
     let table_definition_tokens = generate_table_definition(target_name, fields);
-    let msi_table_impl_tokens = generate_msi_table_impl(fields);
+    let msi_table_impl_tokens = generate_msi_table_impl(target_name, fields);
     quote! {
         #table_definition_tokens
         #msi_table_impl_tokens
@@ -442,7 +442,7 @@ fn generate_table_definition(target_name: &str, fields: &[FieldInformation]) -> 
     }
 }
 
-fn generate_msi_table_impl(fields: &[FieldInformation]) -> TokenStream {
+fn generate_msi_table_impl(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
     let primary_key_indices = fields
         .iter()
         .enumerate()
@@ -517,8 +517,25 @@ fn generate_msi_table_impl(fields: &[FieldInformation]) -> TokenStream {
         }
     });
 
+    let table_name = table_from_name(target_name);
+    let dao_name = dao_from_name(target_name);
+
     quote! {
-        impl MsiTable for DirectoryTable {
+        impl MsiTable for #table_name {
+            type TableValue = #dao_name;
+
+            fn name() -> &'_static str {
+                #target_name
+            }
+
+            fn entries(&self) -> &Vec<#dao_name> {
+                &self.entries
+            }
+
+            fn entries_mut(&mut self) -> &Vec<#dao_name> {
+                &mut self.entries
+            }
+
             fn primary_key_indices(&self) -> Vec<usize> {
                 vec![#primary_key_indices]
             }
@@ -694,6 +711,20 @@ mod test {
             }
 
             impl MsiTable for DirectoryTable {
+                type TableValue = DirectoryDao;
+
+                fn name() -> &'_static str {
+                    "Directory"
+                }
+
+                fn entries(&self) -> &Vec<DirectoryDao> {
+                    &self.entries
+                }
+
+                fn entries_mut(&mut self) -> &Vec<DirectoryDao> {
+                    &mut self.entries
+                }
+
                 fn primary_key_indices(&self) -> Vec<usize> {
                     vec![0usize,]
                 }
@@ -775,7 +806,21 @@ mod test {
                 entries: Vec<FeatureComponentDao>,
             }
 
-            impl MsiTable for DirectoryTable {
+            impl MsiTable for FeatureComponentTable {
+                type TableValue = FeatureComponentDao;
+
+                fn name() -> &'_static str {
+                    "FeatureComponent"
+                }
+
+                fn entries(&self) -> &Vec<FeatureComponentDao> {
+                    &self.entries
+                }
+
+                fn entries_mut(&mut self) -> &Vec<FeatureComponentDao> {
+                    &mut self.entries
+                }
+
                 fn primary_key_indices(&self) -> Vec<usize> {
                     vec![0usize,1usize,]
                 }
@@ -929,6 +974,18 @@ mod test {
             }
 
             impl MsiTable for DirectoryTable {
+                type TableValue = DirectoryDao;
+                fn name() -> &'_static str {
+                    "Directory"
+                }
+
+                fn entries(&self) -> &Vec<DirectoryDao> {
+                    &self.entries
+                }
+
+                fn entries_mut(&mut self) -> &Vec<DirectoryDao> {
+                    &mut self.entries
+                }
                 fn primary_key_indices(&self) -> Vec<usize> {
                     vec![0usize,]
                 }
@@ -975,7 +1032,21 @@ mod test {
                 entries: Vec<FeatureComponentDao>,
             }
 
-            impl MsiTable for DirectoryTable {
+            impl MsiTable for FeatureComponentTable {
+                type TableValue = FeatureComponentDao;
+
+                fn name() -> &'_static str {
+                    "FeatureComponent"
+                }
+
+                fn entries(&self) -> &Vec<FeatureComponentDao> {
+                    &self.entries
+                }
+
+                fn entries_mut(&mut self) -> &Vec<FeatureComponentDao> {
+                    &mut self.entries
+                }
+
                 fn primary_key_indices(&self) -> Vec<usize> {
                     vec![0usize,1usize,]
                 }
