@@ -329,7 +329,7 @@ fn generate_primary_identifier_impl_definition(
     let dao_primary_identifier = match primary_identifier {
         Some(identifier) => {
             let identifier_ident = identifier.ident.clone();
-            quote! {#identifier_ident.to_identifier()}
+            quote! { Some( #identifier_ident.to_identifier() ) }
         }
         None => {
             quote! { None }
@@ -686,7 +686,7 @@ mod test {
 
             impl PrimaryIdentifier for DirectoryDao {
                 fn primary_identifier(&self) -> Option<Identifier> {
-                    directory.to_identifier()
+                    Some( directory.to_identifier() )
                 }
             }
 
@@ -949,7 +949,7 @@ mod test {
 
             impl PrimaryIdentifier for DirectoryDao {
                 fn primary_identifier(&self) -> Option<Identifier> {
-                    directory.to_identifier()
+                    Some( directory.to_identifier() )
                 }
             }
 
