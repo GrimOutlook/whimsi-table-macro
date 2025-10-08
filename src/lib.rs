@@ -21,10 +21,7 @@ mod msi_tables;
 //     - Determine which columns must be unique accross the MSI.
 //     - Allow custom implementations for insertion into certain tables.
 
-#[proc_macro_derive(
-    MsiTable,
-    attributes(msitable, primary_key, generated, table_unique, package_unique, name)
-)]
+#[proc_macro_derive(MsiTables, attributes(msitable))]
 pub fn gen_tables_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input);
     msi_tables::gen_tables_impl(input).into()
