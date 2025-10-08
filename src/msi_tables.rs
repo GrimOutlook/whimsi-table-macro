@@ -339,7 +339,7 @@ fn generate_primary_identifier_impl_definition(
 
     quote! {
         impl PrimaryIdentifier for #dao_struct_ident {
-            fn primary_identifier(&self) -> Identifier {
+            fn primary_identifier(&self) -> Option<Identifier> {
                 #dao_primary_identifier
             }
         }
@@ -670,7 +670,7 @@ mod test {
             }
 
             impl PrimaryIdentifier for DirectoryDao {
-                fn primary_identifier(&self) -> Identifier {
+                fn primary_identifier(&self) -> Option<Identifier> {
                     directory.to_identifier()
                 }
             }
@@ -755,7 +755,7 @@ mod test {
             }
 
             impl PrimaryIdentifier for FeatureComponentDao {
-                fn primary_identifier(&self) -> Identifier {
+                fn primary_identifier(&self) -> Option<Identifier> {
                     None
                 }
             }
@@ -907,7 +907,7 @@ mod test {
             }
 
             impl PrimaryIdentifier for DirectoryDao {
-                fn primary_identifier(&self) -> Identifier {
+                fn primary_identifier(&self) -> Option<Identifier> {
                     directory.to_identifier()
                 }
             }
@@ -956,7 +956,7 @@ mod test {
             }
 
             impl PrimaryIdentifier for FeatureComponentDao {
-                fn primary_identifier(&self) -> Identifier {
+                fn primary_identifier(&self) -> Option<Identifier> {
                     None
                 }
             }
