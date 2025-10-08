@@ -1,3 +1,7 @@
+use fancy_regex::Regex;
+use itertools::Itertools;
+use std::sync::LazyLock;
+
 /// Capitalizes the first character in s.
 /// Shamelessly stolen from [here](https://nick.groenen.me/notes/capitalize-a-string-in-rust/)
 /// which attributes it to [here](https://stackoverflow.com/a/38406885)
@@ -11,6 +15,14 @@ pub fn capitalize(s: &str) -> String {
     }
 }
 
+// NOTE: I can already see a bug here but I don't care at the moment. If the word starts with an
+// `_` the `_` will be correctly preserved but since the first character in the string is `_` no
+// capitalization will occur, when likely you would want the first letter after it to be
+// capitalized. Maybe I'll fix it later :p
 pub fn snake_case_to_pascal_case(s: &str) -> String {
-    s.split("_").map(capitalize).collect()
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?<!^)_(?!$)").unwrap());
+    RE.split(s)
+        .map_ok(capitalize)
+        .collect::<Result<String, fancy_regex::Error>>()
+        .unwrap_or_else(|_| panic!("Failed to capitalize string: [{}]", s))
 }

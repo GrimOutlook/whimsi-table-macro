@@ -14,6 +14,7 @@ darling = "0.21.3"
 itertools = "0.14.0"
 debug_print = "1.0.0"
 msi = {path = "../rust-msi/"}
+fancy-regex = "0.16.2"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

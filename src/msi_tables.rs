@@ -673,4 +673,86 @@ mod test {
             parsed_expected.to_token_stream().to_string()
         );
     }
+
+    #[test]
+    fn test_msi_table_without_generated_identifier() {
+        let input = quote! {
+            #[MsiTable]
+            #[msitable(name = "FeatureComponent")]
+            struct FeatureComponentDao {
+                #[msitable(primary_key, identifier(foreign_key = "Feature"), category = msi::Category::Identifier, length = 72)]
+                feature_: FeatureIdentifier,
+                #[msitable(primary_key, identifier(foreign_key = "Component"), category = msi::Category::Identifier, length = 72)]
+                component_: ComponentIdentifier,
+            }
+        };
+
+        // Call the macro's internal function
+        let output = msi_tables::gen_tables_impl(input);
+
+        let expected_output = quote! {
+            use whimsi_lib::types::column::identifier::Identifier;
+            use whimsi_lib::types::column::identifier::ToIdentifier;
+            use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
+            use msi::types::helpers::to_msi_value::ToMsiValue;
+
+            struct FeatureComponentDao {
+                feature_: FeatureIdentifier,
+                component_: ComponentIdentifier,
+            }
+
+            impl PrimaryIdentifier for FeatureComponentDao {
+                fn primary_identifier(&self) -> Identifier {
+                    None
+                }
+            }
+
+            impl MsiDao for FeatureComponentDao {
+
+                fn conflicts_with(&self, other: &Self) -> bool {
+                    self.feature_ == other.feature_ && self.component_ == other.component_
+                }
+
+                fn to_row(&self) -> Vec<msi::Value> {
+                    vec![
+                        feature_.to_msi_value(),
+                        component_.to_msi_value(),
+                    ]
+                }
+            }
+
+            struct FeatureComponentTable {
+                entries: Vec<FeatureComponentDao>,
+            }
+
+            impl MsiTable for DirectoryTable {
+                fn primary_key_indices(&self) -> Vec<usize> {
+                    vec![0usize,1usize,]
+                }
+
+                fn primary_keys(&self) -> Vec<ColumnType> {
+                    vec![feature_.into(),component_.into(),]
+                }
+
+                fn columns(&self) -> Vec<msi::Column> {
+                    vec![
+                        msi::Column::build("Feature_").primary_key().foreign_key("Feature", 0).category(msi::Category::Identifier).string(72),
+                        msi::Column::build("Component_").primary_key().foreign_key("Component", 0).category(msi::Category::Identifier).string(72),
+                    ]
+                }
+            }
+
+        };
+
+        // Compare the generated output with the expected output (e.g., using syn and comparing ASTs)
+        let parsed_output =
+            syn::parse2::<syn::File>(output).expect("Failed to parse output of test data");
+        let parsed_expected =
+            syn::parse2::<syn::File>(expected_output).expect("Failed to parse reference test data");
+
+        assert_eq!(
+            parsed_output.to_token_stream().to_string(),
+            parsed_expected.to_token_stream().to_string()
+        );
+    }
 }
