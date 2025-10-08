@@ -1,13 +1,12 @@
-use std::ptr::NonNull;
+use std::str::FromStr;
 
 use darling::{FromDeriveInput, FromField};
 use debug_print::debug_println;
 use itertools::Itertools;
-use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, TokenStreamExt, format_ident, quote};
-use syn::token::Token;
-use syn::{self, Fields};
-use syn::{DeriveInput, Field, Ident, punctuated::Punctuated, spanned::Spanned};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+use syn::Ident;
+use syn::{self};
 
 use crate::constants::*;
 use crate::helper;
@@ -33,7 +32,16 @@ struct FieldInformation {
 
     // -- Custom --------------------------------------------------------------
     // The category that the given column will be converted to when placed in the table.
-    category: whimsi_msi::Category,
+    category: syn::Expr,
+
+    // The maximum length of the string placed in the column. This is specific to each table so I
+    // can't abstract it away. If it is not provided a default based on the provided Category is
+    // used.
+    //
+    // NOTE: I considered making this optional and using sane defaults for columns
+    // based on the given category but I like the idea of not obscuring what values
+    // are being used for a given column.
+    length: syn::Expr,
 
     // What the name of the column is. If it is not provided the identifier of the field is
     // converted to title case and underscores are removed.
@@ -68,7 +76,6 @@ struct IdentifierInformation {
 pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
     let input = syn::parse2::<syn::DeriveInput>(input).unwrap();
     let new_table = NewTableDef::from_derive_input(&input).expect("Failed to parse derive input");
-    let table_span = new_table.ident.span();
 
     // Make sure the target name is capitalized. There are no cases where we want
     // structs to be named in snake_case.
@@ -102,26 +109,21 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
         });
 
     let identifier_tokens = if let Some(ref primary_identifier) = primary_identifier {
-        generate_identifier_tokens(&target_name, table_span, primary_identifier)
+        generate_identifier_tokens(&target_name, primary_identifier)
     } else {
         Default::default()
     };
 
-    let dao_tokens = generate_dao_tokens(
-        &target_name,
-        table_span,
-        &primary_identifier,
-        &struct_data.fields,
-    );
+    let dao_tokens = generate_dao_tokens(&target_name, &primary_identifier, &struct_data.fields);
 
-    let table_tokens = generate_table_tokens(&target_name, table_span, &struct_data.fields);
+    let table_tokens = generate_table_tokens(&target_name, &struct_data.fields);
 
     // Generate the DAO code.
     let output_tokens = quote! {
         use whimsi_lib::types::column::identifier::Identifier;
         use whimsi_lib::types::column::identifier::ToIdentifier;
         use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-        use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
+        use msi::types::helpers::to_msi_value::ToMsiValue;
 
         #identifier_tokens
         #dao_tokens
@@ -134,18 +136,17 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
 
 fn generate_identifier_tokens(
     target_name: &str,
-    span: Span,
     primary_identifier: &FieldInformation,
 ) -> TokenStream {
     let primary_identifier_impl_tokens =
-        generate_identifier_definition(target_name, span, primary_identifier);
+        generate_identifier_definition(target_name, primary_identifier);
 
     // If the primary identifier requires a generator, create that now.
     let identifier_generator_definition_tokens = if let Some(identifier_options) =
         &primary_identifier.identifier_options
         && identifier_options.generated
     {
-        generate_identifier_generator_definition(target_name, span)
+        generate_identifier_generator_definition(target_name)
     } else {
         Default::default()
     };
@@ -158,7 +159,6 @@ fn generate_identifier_tokens(
 
 fn generate_identifier_definition(
     target_name: &str,
-    span: Span,
     primary_identifier: &FieldInformation,
 ) -> TokenStream {
     let name = primary_identifier
@@ -171,7 +171,7 @@ fn generate_identifier_definition(
         name
     );
 
-    let new_identifier_ident = identifier_from_name(target_name, span);
+    let new_identifier_ident = identifier_from_name(target_name);
 
     let identifier_comment = &format!(
         "This is a simple wrapper around `Identifier` for the `{target_name}{TABLE_SUFFIX}`. \
@@ -189,9 +189,9 @@ fn generate_identifier_definition(
     }
 }
 
-fn generate_identifier_generator_definition(target_name: &str, span: Span) -> TokenStream {
-    let identifier_ident = identifier_from_name(target_name, span);
-    let identifier_generator_struct_ident = identifier_generator_from_name(target_name, span);
+fn generate_identifier_generator_definition(target_name: &str) -> TokenStream {
+    let identifier_ident = identifier_from_name(target_name);
+    let identifier_generator_struct_ident = identifier_generator_from_name(target_name);
     let identifier_prefix = target_name.to_uppercase();
     quote! {
         #[derive(Debug, Clone, Default, PartialEq)]
@@ -236,17 +236,16 @@ fn generate_identifier_generator_definition(target_name: &str, span: Span) -> To
 
 fn generate_dao_tokens(
     target_name: &str,
-    span: Span,
     primary_identifier: &Option<FieldInformation>,
     fields: &Vec<FieldInformation>,
 ) -> TokenStream {
-    let dao_struct_ident = dao_from_name(target_name, span);
+    let dao_struct_ident = dao_from_name(target_name);
 
-    let dao_struct_definition_tokens = generate_dao_struct_definition(&dao_struct_ident, &fields);
+    let dao_struct_definition_tokens = generate_dao_struct_definition(&dao_struct_ident, fields);
     let primary_identifier_impl_definition_tokens =
         generate_primary_identifier_impl_definition(primary_identifier, &dao_struct_ident);
     let msi_dao_impl_definition_tokens =
-        generate_msi_dao_impl_definition(&dao_struct_ident, &fields);
+        generate_msi_dao_impl_definition(&dao_struct_ident, fields);
 
     quote! {
         #dao_struct_definition_tokens
@@ -359,7 +358,7 @@ fn generate_msi_dao_to_row_definition(fields: &Vec<FieldInformation>) -> TokenSt
     }
 
     quote! {
-        fn to_row(&self) -> Vec<whimsi_msi::Value> {
+        fn to_row(&self) -> Vec<msi::Value> {
             vec![
                 #fields_to_msi_value_tokens
             ]
@@ -367,32 +366,24 @@ fn generate_msi_dao_to_row_definition(fields: &Vec<FieldInformation>) -> TokenSt
     }
 }
 
-fn generate_table_tokens(
-    target_name: &str,
-    span: Span,
-    fields: &[FieldInformation],
-) -> TokenStream {
-    let table_definition_tokens = generate_table_definition(target_name, span, fields);
-    let msi_table_impl_tokens = generate_msi_table_impl(span, fields);
+fn generate_table_tokens(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
+    let table_definition_tokens = generate_table_definition(target_name, fields);
+    let msi_table_impl_tokens = generate_msi_table_impl(fields);
     quote! {
         #table_definition_tokens
         #msi_table_impl_tokens
     }
 }
 
-fn generate_table_definition(
-    target_name: &str,
-    span: Span,
-    fields: &[FieldInformation],
-) -> TokenStream {
-    let table_ident = table_from_name(target_name, span);
-    let dao_type = dao_from_name(target_name, span);
+fn generate_table_definition(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
+    let table_ident = table_from_name(target_name);
+    let dao_type = dao_from_name(target_name);
     let generator_definition = if fields
         .iter()
         .filter_map(|f| f.identifier_options.clone())
         .any(|i| i.generated)
     {
-        let generator_type = identifier_generator_from_name(target_name, span);
+        let generator_type = identifier_generator_from_name(target_name);
         quote! {
             generator: #generator_type,
         }
@@ -408,7 +399,7 @@ fn generate_table_definition(
     }
 }
 
-fn generate_msi_table_impl(span: Span, fields: &[FieldInformation]) -> TokenStream {
+fn generate_msi_table_impl(fields: &[FieldInformation]) -> TokenStream {
     let primary_key_indices = fields
         .iter()
         .enumerate()
@@ -470,15 +461,16 @@ fn generate_msi_table_impl(span: Span, fields: &[FieldInformation]) -> TokenStre
             Default::default()
         };
 
-        // TODO: I dislike having to hard code in the `whimsi_msi` path here but couldn't find a
+        // TODO: I dislike having to hard code in the `msi` path here but couldn't find a
         // better solution. Should probably look into it some more.
-        let field_category = format_ident!("whimsi_msi::Category::{}", &field.category.to_string());
-        let category = quote! { .category(#field_category) };
+        let field_category = &field.category;
+        let category = quote! { .category( #field_category ) };
         let finish = generate_finish_build_for_field(field);
 
         quote! {
             #acc
-            whimsi_msi::Column::build(#column_name) #primary_key #nullable #localizable #foreign_key #category #finish,
+
+            msi::Column::build(#column_name) #primary_key #nullable #localizable #foreign_key #category #finish,
         }
     });
 
@@ -492,7 +484,7 @@ fn generate_msi_table_impl(span: Span, fields: &[FieldInformation]) -> TokenStre
                 vec![#primary_keys]
             }
 
-            fn columns(&self) -> Vec<whimsi_msi::Column> {
+            fn columns(&self) -> Vec<msi::Column> {
                 vec![
                     #columns
                 ]
@@ -501,28 +493,43 @@ fn generate_msi_table_impl(span: Span, fields: &[FieldInformation]) -> TokenStre
     }
 }
 
-fn get_base_type(field: &FieldInformation) -> TokenStream {
-    todo!()
-}
-
 fn generate_finish_build_for_field(field: &FieldInformation) -> TokenStream {
-    quote!()
+    let syn::Expr::Path(ref path) = field.category else {
+        panic!("Category is not a valid syn::Expr::Path.")
+    };
+    let category_str = path
+        .path
+        .segments
+        .last()
+        .expect("Path contains no segments")
+        .ident
+        .to_string();
+    let category = msi::Category::from_str(&category_str)
+        .unwrap_or_else(|_| panic!("Category is invalid: {}", category_str));
+    match category {
+        msi::Category::Integer => quote! {.int16()},
+        msi::Category::DoubleInteger => quote! {.int32()},
+        _ => {
+            let length = &field.length;
+            quote! {.string(#length)}
+        }
+    }
 }
 
-fn dao_from_name(target_name: &str, span: Span) -> Ident {
+fn dao_from_name(target_name: &str) -> Ident {
     format_ident!("{target_name}{DAO_SUFFIX}")
 }
 
-fn table_from_name(target_name: &str, span: Span) -> Ident {
+fn table_from_name(target_name: &str) -> Ident {
     format_ident!("{target_name}{TABLE_SUFFIX}")
 }
 
-fn identifier_from_name(target_name: &str, span: Span) -> Ident {
+fn identifier_from_name(target_name: &str) -> Ident {
     format_ident!("{target_name}{IDENTIFIER_SUFFIX}")
 }
 
-fn identifier_generator_from_name(target_name: &str, span: Span) -> Ident {
-    let identifier = identifier_from_name(target_name, span);
+fn identifier_generator_from_name(target_name: &str) -> Ident {
+    let identifier = identifier_from_name(target_name);
     format_ident!("{identifier}{GENERATOR_SUFFIX}")
 }
 
@@ -539,11 +546,11 @@ mod test {
             #[MsiTable]
             #[msitable(name = "Directory")]
             struct DirectoryDao {
-                #[msitable(primary_key, identifier(generated), category(whimsi_msi::Category::Identifier))]
+                #[msitable(primary_key, identifier(generated), category = msi::Category::Identifier, length = 72)]
                 directory: DirectoryIdentifier,
-                #[msitable(identifier(foreign_key = "DirectoryTable"), column_name = "Directory_Parent", category(whimsi_msi::Category::Identifier))]
+                #[msitable(identifier(foreign_key = "Directory"), column_name = "Directory_Parent", category = msi::Category::Identifier, length = 72)]
                 parent_directory: Option<DirectoryIdentifier>,
-                #[msitable(localizable, category(whimsi_msi::Category::DefaultDir))]
+                #[msitable(localizable, category = msi::Category::DefaultDir, length = 255)]
                 default_dir: DefaultDir,
             }
         };
@@ -555,7 +562,7 @@ mod test {
             use whimsi_lib::types::column::identifier::Identifier;
             use whimsi_lib::types::column::identifier::ToIdentifier;
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-            use whimsi_msi::types::helpers::to_msi_value::ToMsiValue;
+            use msi::types::helpers::to_msi_value::ToMsiValue;
 
             #[doc = "This is a simple wrapper around `Identifier` for the `DirectoryTable`. Used to ensure that identifiers for the `DirectoryTable` are only used in valid locations."]
             pub struct DirectoryIdentifier(Identifier);
@@ -621,7 +628,7 @@ mod test {
                     self.directory == other.directory
                 }
 
-                fn to_row(&self) -> Vec<whimsi_msi::Value> {
+                fn to_row(&self) -> Vec<msi::Value> {
                     vec![
                         directory.to_msi_value(),
                         parent_directory.to_msi_value(),
@@ -637,18 +644,18 @@ mod test {
 
             impl MsiTable for DirectoryTable {
                 fn primary_key_indices(&self) -> Vec<usize> {
-                    vec![1]
+                    vec![0usize,]
                 }
 
-                fn primary_keys(&self) -> Vec<ColumnTypes> {
-                    vec![directory.into()]
+                fn primary_keys(&self) -> Vec<ColumnType> {
+                    vec![directory.into(),]
                 }
 
-                fn columns(&self) -> Vec<whimsi_msi::Column> {
+                fn columns(&self) -> Vec<msi::Column> {
                     vec![
-                        whimsi_msi::Column::build("Directory").primary_key().id_string(DEFAULT_IDENTIFIER_MAX_LEN),
-                        whimsi_msi::Column::build("Directory_Parent").nullable().foreign_key("Directory", 0).id_string(DEFAULT_IDENTIFIER_MAX_LEN),
-                        whimsi_msi::Column::build("DefaultDir").localizable().category(whimsi_msi::Category::DefaultDir).string(255),
+                        msi::Column::build("Directory").primary_key().category(msi::Category::Identifier).string(72),
+                        msi::Column::build("Directory_Parent").nullable().foreign_key("Directory", 0).category(msi::Category::Identifier).string(72),
+                        msi::Column::build("DefaultDir").localizable().category(msi::Category::DefaultDir).string(255),
                     ]
                 }
             }

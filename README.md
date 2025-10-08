@@ -7,7 +7,7 @@ working version quickly.
 
 ## Requirements
 
-- DAO field types implement `Into<whimsi_msi::Value>`.
-- DAO field type names match the corresponding `whimsi_msi::Category` are sized
+- DAO field types implement `Into<msi::Value>`.
+- DAO field type names match the corresponding `msi::Category` are sized
   integers, or explicitly define the category of the column in the derive
   attribute.

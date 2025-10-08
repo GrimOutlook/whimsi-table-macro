@@ -111,6 +111,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "heck"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
+
+[[package]]
 name = "icu_casemap"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -264,6 +270,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
+name = "msi"
+version = "0.9.0"
+dependencies = [
+ "byteorder",
+ "cfb",
+ "darling",
+ "encoding_rs",
+ "itertools",
+ "proc-macro2",
+ "quote",
+ "strum",
+ "uuid",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -349,6 +370,21 @@ name = "strum"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "syn"
@@ -458,32 +494,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "whimsi-msi"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "cfb",
- "darling",
- "encoding_rs",
- "itertools",
- "proc-macro2",
- "quote",
- "strum",
- "uuid",
-]
-
-[[package]]
 name = "whimsi-table-macro"
 version = "0.1.0"
 dependencies = [
  "darling",
  "debug_print",
  "itertools",
+ "msi",
  "pretty_assertions",
  "proc-macro2",
  "quote",
  "syn",
- "whimsi-msi",
 ]
 
 [[package]]
