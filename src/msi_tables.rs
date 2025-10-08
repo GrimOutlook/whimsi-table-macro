@@ -102,7 +102,7 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
         use whimsi_lib::types::column::identifier::Identifier;
         use whimsi_lib::types::column::identifier::ToIdentifier;
         use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-        use msi::types::helpers::to_msi_value::ToMsiValue;
+        use msi::ToMsiValue;
 
         #output_tokens
     }
@@ -223,6 +223,14 @@ fn generate_identifier_definition(
                 self.0
             }
         }
+
+        impl std::str::FromStr for #new_identifier_ident {
+            type Err = anyhow::Error;
+
+            fn from_str(s: &str) -> anyhow::Result<Self> {
+                Ok(Self(Identifier::from_str(s)?))
+            }
+        }
     }
 }
 
@@ -278,16 +286,15 @@ fn generate_dao_tokens(
 ) -> TokenStream {
     let dao_struct_ident = dao_from_name(target_name);
 
-    let dao_struct_definition_tokens = generate_dao_struct_definition(&dao_struct_ident, fields);
-    let primary_identifier_impl_definition_tokens =
+    let dao_struct_tokens = generate_dao_struct_definition(&dao_struct_ident, fields);
+    let primary_identifier_impl_tokens =
         generate_primary_identifier_impl_definition(primary_identifier, &dao_struct_ident);
-    let msi_dao_impl_definition_tokens =
-        generate_msi_dao_impl_definition(&dao_struct_ident, fields);
+    let msi_dao_impl_tokens = generate_msi_dao_impl_definition(&dao_struct_ident, fields);
 
     quote! {
-        #dao_struct_definition_tokens
-        #primary_identifier_impl_definition_tokens
-        #msi_dao_impl_definition_tokens
+        #dao_struct_tokens
+        #primary_identifier_impl_tokens
+        #msi_dao_impl_tokens
     }
 }
 
@@ -599,13 +606,22 @@ mod test {
             use whimsi_lib::types::column::identifier::Identifier;
             use whimsi_lib::types::column::identifier::ToIdentifier;
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-            use msi::types::helpers::to_msi_value::ToMsiValue;
+            use msi::ToMsiValue;
 
             #[doc = "This is a simple wrapper around `Identifier` for the `DirectoryTable`. Used to ensure that identifiers for the `DirectoryTable` are only used in valid locations."]
             pub struct DirectoryIdentifier(Identifier);
+
             impl ToIdentifier for DirectoryIdentifier {
                 fn to_identifier(&self) -> Identifier {
                     self.0
+                }
+            }
+
+            impl std::str::FromStr for DirectoryIdentifier {
+                type Err = anyhow::Error;
+
+                fn from_str(s: &str) -> anyhow::Result<Self> {
+                    Ok(Self(Identifier::from_str(s)?))
                 }
             }
 
@@ -731,7 +747,7 @@ mod test {
             use whimsi_lib::types::column::identifier::Identifier;
             use whimsi_lib::types::column::identifier::ToIdentifier;
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-            use msi::types::helpers::to_msi_value::ToMsiValue;
+            use msi::ToMsiValue;
 
             struct FeatureComponentDao {
                 feature_: FeatureIdentifier,
@@ -823,7 +839,7 @@ mod test {
             use whimsi_lib::types::column::identifier::Identifier;
             use whimsi_lib::types::column::identifier::ToIdentifier;
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-            use msi::types::helpers::to_msi_value::ToMsiValue;
+            use msi::ToMsiValue;
 
             pub enum MsiTables {
                 Directory(DirectoryTable),
@@ -832,9 +848,17 @@ mod test {
 
             #[doc = "This is a simple wrapper around `Identifier` for the `DirectoryTable`. Used to ensure that identifiers for the `DirectoryTable` are only used in valid locations."]
             pub struct DirectoryIdentifier(Identifier);
+
             impl ToIdentifier for DirectoryIdentifier {
                 fn to_identifier(&self) -> Identifier {
                     self.0
+                }
+            }
+            impl std::str::FromStr for DirectoryIdentifier {
+                type Err = anyhow::Error;
+
+                fn from_str(s: &str) -> anyhow::Result<Self> {
+                    Ok(Self(Identifier::from_str(s)?))
                 }
             }
 
