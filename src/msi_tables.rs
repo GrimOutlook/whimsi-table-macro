@@ -517,7 +517,7 @@ fn generate_msi_table_impl(fields: &[FieldInformation]) -> TokenStream {
                 vec![#primary_key_indices]
             }
 
-            fn primary_keys(&self) -> Vec<ColumnType> {
+            fn primary_keys(&self) -> Vec<msi::ColumnType> {
                 vec![#primary_keys]
             }
 
@@ -684,7 +684,7 @@ mod test {
                     vec![0usize,]
                 }
 
-                fn primary_keys(&self) -> Vec<ColumnType> {
+                fn primary_keys(&self) -> Vec<msi::ColumnType> {
                     vec![directory.into(),]
                 }
 
@@ -767,7 +767,7 @@ mod test {
                     vec![0usize,1usize,]
                 }
 
-                fn primary_keys(&self) -> Vec<ColumnType> {
+                fn primary_keys(&self) -> Vec<msi::ColumnType> {
                     vec![feature_.into(),component_.into(),]
                 }
 
@@ -913,7 +913,7 @@ mod test {
                     vec![0usize,]
                 }
 
-                fn primary_keys(&self) -> Vec<ColumnType> {
+                fn primary_keys(&self) -> Vec<msi::ColumnType> {
                     vec![directory.into(),]
                 }
 
@@ -960,7 +960,7 @@ mod test {
                     vec![0usize,1usize,]
                 }
 
-                fn primary_keys(&self) -> Vec<ColumnType> {
+                fn primary_keys(&self) -> Vec<msi::ColumnType> {
                     vec![feature_.into(),component_.into(),]
                 }
 
