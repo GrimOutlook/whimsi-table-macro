@@ -524,7 +524,7 @@ fn generate_msi_table_impl(target_name: &str, fields: &[FieldInformation]) -> To
         impl MsiTable for #table_name {
             type TableValue = #dao_name;
 
-            fn name(&self) -> &'_static str {
+            fn name(&self) -> &'static str {
                 #target_name
             }
 
@@ -713,7 +713,7 @@ mod test {
             impl MsiTable for DirectoryTable {
                 type TableValue = DirectoryDao;
 
-                fn name(&self) -> &'_static str {
+                fn name(&self) -> &'static str {
                     "Directory"
                 }
 
@@ -809,7 +809,7 @@ mod test {
             impl MsiTable for FeatureComponentTable {
                 type TableValue = FeatureComponentDao;
 
-                fn name(&self) -> &'_static str {
+                fn name(&self) -> &'static str {
                     "FeatureComponent"
                 }
 
@@ -975,7 +975,7 @@ mod test {
 
             impl MsiTable for DirectoryTable {
                 type TableValue = DirectoryDao;
-                fn name(&self) -> &'_static str {
+                fn name(&self) -> &'static str {
                     "Directory"
                 }
 
@@ -1035,7 +1035,7 @@ mod test {
             impl MsiTable for FeatureComponentTable {
                 type TableValue = FeatureComponentDao;
 
-                fn name(&self) -> &'_static str {
+                fn name(&self) -> &'static str {
                     "FeatureComponent"
                 }
 
