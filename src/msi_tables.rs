@@ -102,7 +102,7 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
         use whimsi_lib::types::column::identifier::Identifier;
         use whimsi_lib::types::column::identifier::ToIdentifier;
         use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-        use msi::ToMsiValue;
+        use msi::ToValue;
 
         #output_tokens
     }
@@ -397,7 +397,7 @@ fn generate_msi_dao_to_row_definition(fields: &Vec<FieldInformation>) -> TokenSt
         let field_ident = &field.ident;
         fields_to_msi_value_tokens = quote! {
             #fields_to_msi_value_tokens
-            #field_ident.to_msi_value(),
+            msi::ToValue(#field_ident),
         }
     }
 
@@ -606,7 +606,7 @@ mod test {
             use whimsi_lib::types::column::identifier::Identifier;
             use whimsi_lib::types::column::identifier::ToIdentifier;
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-            use msi::ToMsiValue;
+            use msi::ToValue;
 
             #[doc = "This is a simple wrapper around `Identifier` for the `DirectoryTable`. Used to ensure that identifiers for the `DirectoryTable` are only used in valid locations."]
             pub struct DirectoryIdentifier(Identifier);
@@ -683,9 +683,9 @@ mod test {
 
                 fn to_row(&self) -> Vec<msi::Value> {
                     vec![
-                        directory.to_msi_value(),
-                        parent_directory.to_msi_value(),
-                        default_dir.to_msi_value(),
+                        msi::ToValue(directory),
+                        msi::ToValue(parent_directory),
+                        msi::ToValue(default_dir),
                     ]
                 }
             }
@@ -747,7 +747,7 @@ mod test {
             use whimsi_lib::types::column::identifier::Identifier;
             use whimsi_lib::types::column::identifier::ToIdentifier;
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-            use msi::ToMsiValue;
+            use msi::ToValue;
 
             struct FeatureComponentDao {
                 feature_: FeatureIdentifier,
@@ -768,8 +768,8 @@ mod test {
 
                 fn to_row(&self) -> Vec<msi::Value> {
                     vec![
-                        feature_.to_msi_value(),
-                        component_.to_msi_value(),
+                        msi::ToValue(feature_),
+                        msi::ToValue(component_),
                     ]
                 }
             }
@@ -839,7 +839,7 @@ mod test {
             use whimsi_lib::types::column::identifier::Identifier;
             use whimsi_lib::types::column::identifier::ToIdentifier;
             use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-            use msi::ToMsiValue;
+            use msi::ToValue;
 
             pub enum MsiTables {
                 Directory(DirectoryTable),
@@ -920,9 +920,9 @@ mod test {
 
                 fn to_row(&self) -> Vec<msi::Value> {
                     vec![
-                        directory.to_msi_value(),
-                        parent_directory.to_msi_value(),
-                        default_dir.to_msi_value(),
+                        msi::ToValue(directory),
+                        msi::ToValue(parent_directory),
+                        msi::ToValue(default_dir),
                     ]
                 }
             }
@@ -969,8 +969,8 @@ mod test {
 
                 fn to_row(&self) -> Vec<msi::Value> {
                     vec![
-                        feature_.to_msi_value(),
-                        component_.to_msi_value(),
+                        msi::ToValue(feature_),
+                        msi::ToValue(component_),
                     ]
                 }
             }
