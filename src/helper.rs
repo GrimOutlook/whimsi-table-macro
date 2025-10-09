@@ -1,6 +1,9 @@
+use crate::constants::*;
 use fancy_regex::Regex;
 use itertools::Itertools;
+use quote::format_ident;
 use std::sync::LazyLock;
+use syn::Ident;
 
 /// Capitalizes the first character in s.
 /// Shamelessly stolen from [here](https://nick.groenen.me/notes/capitalize-a-string-in-rust/)
@@ -25,4 +28,21 @@ pub fn snake_case_to_pascal_case(s: &str) -> String {
         .map_ok(capitalize)
         .collect::<Result<String, fancy_regex::Error>>()
         .unwrap_or_else(|_| panic!("Failed to capitalize string: [{}]", s))
+}
+
+pub fn dao_from_name(target_name: &str) -> Ident {
+    format_ident!("{target_name}{DAO_SUFFIX}")
+}
+
+pub fn table_from_name(target_name: &str) -> Ident {
+    format_ident!("{target_name}{TABLE_SUFFIX}")
+}
+
+pub fn identifier_from_name(target_name: &str) -> Ident {
+    format_ident!("{target_name}{IDENTIFIER_SUFFIX}")
+}
+
+pub fn identifier_generator_from_name(target_name: &str) -> Ident {
+    let identifier = identifier_from_name(target_name);
+    format_ident!("{identifier}{GENERATOR_SUFFIX}")
 }

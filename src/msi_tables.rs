@@ -1,47 +1,45 @@
-use std::str::FromStr;
-
 use darling::{FromDeriveInput, FromField, FromVariant};
-use debug_print::debug_println;
 use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::Ident;
 use syn::{self};
 
-use crate::constants::*;
-use crate::helper;
+use crate::{
+    dao::generate_dao_tokens, helper::*, identifier::generate_identifier_tokens,
+    table::generate_table_tokens,
+};
 
 #[derive(FromDeriveInput, Clone)]
 #[darling(attributes(msi_table))]
-struct DeriveInformation {
-    ident: syn::Ident,
-    data: darling::ast::Data<VariantInformation, FieldInformation>,
+pub(crate) struct DeriveInformation {
+    pub ident: syn::Ident,
+    pub data: darling::ast::Data<VariantInformation, FieldInformation>,
 
     // WARN: ONLY USED IF DERIVED ITEM IS A `struct`!
     //
     // If this is a struct, the base name of the table to create. EX: "Directory" will produces
     // struct names such as "DirectoryDao" and "DirectoryTable".
-    name: Option<String>,
+    pub name: Option<String>,
 }
 
 #[derive(FromVariant, Clone)]
-struct VariantInformation {
-    ident: syn::Ident,
-    fields: darling::ast::Fields<FieldInformation>,
+pub(crate) struct VariantInformation {
+    pub ident: syn::Ident,
+    pub fields: darling::ast::Fields<FieldInformation>,
 }
 
 #[derive(FromField, Clone)]
 #[darling(attributes(msi_column))]
-struct FieldInformation {
+pub(crate) struct FieldInformation {
     // -- Builtins ------------------------------------------------------------
     // Field name
-    ident: Option<syn::Ident>,
+    pub ident: Option<syn::Ident>,
     // Type of the field
-    ty: syn::Type,
+    pub ty: syn::Type,
 
     // -- Custom --------------------------------------------------------------
     // The category that the given column will be converted to when placed in the table.
-    category: syn::Expr,
+    pub category: syn::Expr,
 
     // The maximum length of the string placed in the column. This is specific to each table so I
     // can't abstract it away. If it is not provided a default based on the provided Category is
@@ -49,37 +47,38 @@ struct FieldInformation {
     //
     // NOTE: I considered making this optional and using sane defaults for columns
     // based on the given category but I like the idea of not obscuring what values
-    // are being used for a given column.
-    length: syn::Expr,
+    // are being used for a given column. This is only optional for categories of Integer and
+    // DoubleInteger.
+    pub length: Option<syn::Expr>,
 
     // What the name of the column is. If it is not provided the identifier of the field is
     // converted to title case and underscores are removed.
     #[darling(default)]
-    column_name: Option<String>,
+    pub column_name: Option<String>,
 
     // Denotes if the given field corresponds to a primary key in the table.
     #[darling(default)]
-    primary_key: bool,
+    pub primary_key: bool,
 
     // Denotes if the given field is an identifier.
     #[darling(default, rename = "identifier")]
-    identifier_options: Option<IdentifierInformation>,
+    pub identifier_options: Option<IdentifierInformation>,
 
     // Whether or not the given field is localizable as specified in the MSI documentation.
     #[darling(default)]
-    localizable: bool,
+    pub localizable: bool,
 }
 
 #[derive(darling::FromMeta, FromField, Clone)]
-struct IdentifierInformation {
+pub(crate) struct IdentifierInformation {
     // Denotes if the given identifier should have a generator created for it.
     #[darling(default)]
-    generated: bool,
+    pub generated: bool,
 
     // Denotes if the given identifier is a foreign key into the table and if it is, what table the
     // key is from.
     #[darling(default)]
-    foreign_key: Option<String>,
+    pub foreign_key: Option<String>,
 }
 
 pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
@@ -92,8 +91,7 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
             gen_tables_for_enum(&derive_input.ident.to_string(), items)
         }
         darling::ast::Data::Struct(fields) => {
-            let name =
-                helper::capitalize(&derive_input.name.unwrap_or(derive_input.ident.to_string()));
+            let name = capitalize(&derive_input.name.unwrap_or(derive_input.ident.to_string()));
             gen_tables_for_fields(&name, fields.fields)
         }
     };
@@ -108,16 +106,29 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
 }
 
 fn gen_tables_for_enum(name: &str, items: Vec<VariantInformation>) -> TokenStream {
-    let struct_variants = items.iter().map(|v| {
-        let variant = v.ident.clone();
-        let table_name = format_ident!("{}", table_from_name(&variant.to_string()));
-        quote! { #variant ( #table_name ) , }
-    });
+    let (struct_variants, dao_variants) = items
+        .iter()
+        .map(|v| {
+            let variant = v.ident.clone();
+            let table_name = table_from_name(&variant.to_string());
+            let dao_name = dao_from_name(&variant.to_string());
+            (
+                quote! { #variant ( #table_name ) , },
+                quote! { #variant ( #dao_name ) , },
+            )
+        })
+        .collect::<(Vec<TokenStream>, Vec<TokenStream>)>();
+
     // Generate the enum containing all of the variant structs
-    let name = format_ident!("{name}");
+    let table_enum_name = format_ident!("{name}");
+    let dao_enum_name = dao_from_name(name);
     let tokens = quote! {
-        pub enum #name {
+        pub enum #table_enum_name {
             #(#struct_variants)*
+        }
+
+        pub enum #dao_enum_name {
+            #(#dao_variants)*
         }
     };
     items.iter().fold(tokens, |acc, variant| {
@@ -131,7 +142,7 @@ fn gen_tables_for_enum(name: &str, items: Vec<VariantInformation>) -> TokenStrea
 }
 
 fn gen_tables_for_fields(base_name: &str, fields: Vec<FieldInformation>) -> TokenStream {
-    let target_name = helper::capitalize(base_name);
+    let target_name = capitalize(base_name);
 
     // Create the table-specific identifier if one should be made. These are made when a table has
     // a column with a type that implements `ToIdentifier` and the column is not marked as a
@@ -168,429 +179,6 @@ fn gen_tables_for_fields(base_name: &str, fields: Vec<FieldInformation>) -> Toke
     };
 
     output_tokens
-}
-
-fn generate_identifier_tokens(
-    target_name: &str,
-    primary_identifier: &FieldInformation,
-) -> TokenStream {
-    let primary_identifier_impl_tokens =
-        generate_identifier_definition(target_name, primary_identifier);
-
-    // If the primary identifier requires a generator, create that now.
-    let identifier_generator_definition_tokens = if let Some(identifier_options) =
-        &primary_identifier.identifier_options
-        && identifier_options.generated
-    {
-        generate_identifier_generator_definition(target_name)
-    } else {
-        Default::default()
-    };
-
-    quote! {
-        #primary_identifier_impl_tokens
-        #identifier_generator_definition_tokens
-    }
-}
-
-fn generate_identifier_definition(
-    target_name: &str,
-    primary_identifier: &FieldInformation,
-) -> TokenStream {
-    let name = primary_identifier
-        .ident
-        .clone()
-        .unwrap_or_else(|| panic!("Identifier for target [{}] was None", target_name));
-    debug_println!(
-        "Primary identifier field for struct [{}]: {}",
-        target_name,
-        name
-    );
-
-    let new_identifier_ident = identifier_from_name(target_name);
-
-    let identifier_comment = &format!(
-        "This is a simple wrapper around `Identifier` for the `{target_name}{TABLE_SUFFIX}`. \
-        Used to ensure that identifiers for the `{target_name}{TABLE_SUFFIX}` are only used in valid locations."
-    );
-    quote! {
-        #[doc = #identifier_comment]
-        pub struct #new_identifier_ident(Identifier);
-
-        impl ToIdentifier for #new_identifier_ident {
-            fn to_identifier(&self) -> Identifier {
-                self.0
-            }
-        }
-
-        impl std::str::FromStr for #new_identifier_ident {
-            type Err = anyhow::Error;
-
-            fn from_str(s: &str) -> anyhow::Result<Self> {
-                Ok(Self(Identifier::from_str(s)?))
-            }
-        }
-    }
-}
-
-fn generate_identifier_generator_definition(target_name: &str) -> TokenStream {
-    let identifier_ident = identifier_from_name(target_name);
-    let identifier_generator_struct_ident = identifier_generator_from_name(target_name);
-    let identifier_prefix = target_name.to_uppercase();
-    quote! {
-        #[derive(Debug, Clone, Default, PartialEq)]
-        pub(crate) struct #identifier_generator_struct_ident {
-            count: usize,
-            // A reference to a vec of all used Identifiers that should not be generated again.
-            // These are all identifiers that inhabit a primary_key column.
-            used: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>,
-        }
-
-        impl IdentifierGenerator for #identifier_generator_struct_ident {
-            type IdentifierType = #identifier_ident;
-
-            fn id_prefix(&self) -> &str {
-                #identifier_prefix
-            }
-
-            fn used(&self) -> &std::rc::Rc<std::cell::RefCell<Vec<Identifier>>> {
-                &self.used
-            }
-
-            fn count(&self) -> usize {
-                self.count
-            }
-
-            fn count_mut(&mut self) -> &mut usize {
-                &mut self.count
-            }
-        }
-
-        impl From<std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>> for #identifier_generator_struct_ident {
-            fn from(value: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>) -> Self {
-                let count = value.borrow().len();
-                Self {
-                    used: value,
-                    count: 0,
-                }
-            }
-        }
-    }
-}
-
-fn generate_dao_tokens(
-    target_name: &str,
-    primary_identifier: &Option<&FieldInformation>,
-    fields: &Vec<FieldInformation>,
-) -> TokenStream {
-    let dao_struct_ident = dao_from_name(target_name);
-
-    let dao_struct_tokens = generate_dao_struct_definition(&dao_struct_ident, fields);
-    let primary_identifier_impl_tokens =
-        generate_primary_identifier_impl_definition(primary_identifier, &dao_struct_ident);
-    let msi_dao_impl_tokens = generate_msi_dao_impl_definition(&dao_struct_ident, fields);
-
-    quote! {
-        #dao_struct_tokens
-        #primary_identifier_impl_tokens
-        #msi_dao_impl_tokens
-    }
-}
-
-fn generate_dao_struct_definition(
-    dao_struct_ident: &Ident,
-    fields: &Vec<FieldInformation>,
-) -> TokenStream {
-    // Pretty sure we could just append `fields` to the token stream for this but I want to
-    // explicitly drop visibilities here so all properties are private.
-    //
-    // TODO: This will _not_ propogate proc-macros placed on the fields. Determine if this is
-    // needed.
-    let mut field_tokens = TokenStream::new();
-    for field in fields {
-        let field_ident = field.ident.clone();
-        let field_type = field.ty.clone();
-        field_tokens = quote! {
-            #field_tokens
-            #field_ident : #field_type ,
-        }
-    }
-    quote! {
-        pub struct #dao_struct_ident {
-            #field_tokens
-        }
-    }
-}
-
-fn generate_primary_identifier_impl_definition(
-    primary_identifier: &Option<&FieldInformation>,
-    dao_struct_ident: &Ident,
-) -> TokenStream {
-    let dao_primary_identifier = match primary_identifier {
-        Some(identifier) => {
-            let identifier_ident = identifier.ident.clone();
-            quote! { Some( self.#identifier_ident.to_identifier() ) }
-        }
-        None => {
-            quote! { None }
-        }
-    };
-
-    quote! {
-        impl PrimaryIdentifier for #dao_struct_ident {
-            fn primary_identifier(&self) -> Option<Identifier> {
-                #dao_primary_identifier
-            }
-        }
-    }
-}
-
-fn generate_msi_dao_impl_definition(
-    dao_struct_ident: &Ident,
-    fields: &Vec<FieldInformation>,
-) -> TokenStream {
-    let conflicts_definition_tokens = generate_msi_dao_conflicts_definition(fields);
-    let to_row_definition_tokens = generate_msi_dao_to_row_definition(fields);
-
-    quote! {
-        impl MsiDao for #dao_struct_ident {
-            #conflicts_definition_tokens
-            #to_row_definition_tokens
-
-        }
-    }
-}
-
-fn generate_msi_dao_conflicts_definition(fields: &Vec<FieldInformation>) -> TokenStream {
-    let mut conflict_expression = TokenStream::new();
-    // Get the fields that are marked as primary_key as these are what is used to check for
-    // conflicts.
-    for field in fields {
-        if !field.primary_key {
-            continue;
-        }
-
-        let and_and = if !conflict_expression.is_empty() {
-            quote!(&&)
-        } else {
-            TokenStream::default()
-        };
-
-        let field_ident = &field.ident;
-        conflict_expression = quote! {
-            #conflict_expression
-            #and_and self.#field_ident == other.#field_ident
-        }
-    }
-
-    quote! {
-        fn conflicts_with(&self, other: &Self) -> bool {
-            #conflict_expression
-        }
-    }
-}
-
-fn generate_msi_dao_to_row_definition(fields: &Vec<FieldInformation>) -> TokenStream {
-    let mut fields_to_msi_value_tokens = TokenStream::new();
-    for field in fields {
-        let field_ident = &field.ident;
-        fields_to_msi_value_tokens = quote! {
-            #fields_to_msi_value_tokens
-            msi::ToValue::to_value(self.#field_ident),
-        }
-    }
-
-    quote! {
-        fn to_row(&self) -> Vec<msi::Value> {
-            vec![
-                #fields_to_msi_value_tokens
-            ]
-        }
-    }
-}
-
-fn generate_table_tokens(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
-    let table_definition_tokens = generate_table_definition(target_name, fields);
-    let msi_table_impl_tokens = generate_msi_table_impl(target_name, fields);
-    quote! {
-        #table_definition_tokens
-        #msi_table_impl_tokens
-    }
-}
-
-fn generate_table_definition(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
-    let table_ident = table_from_name(target_name);
-    let dao_type = dao_from_name(target_name);
-    let generator_definition = if fields
-        .iter()
-        .filter_map(|f| f.identifier_options.clone())
-        .any(|i| i.generated)
-    {
-        let generator_type = identifier_generator_from_name(target_name);
-        quote! {
-            generator: #generator_type,
-        }
-    } else {
-        Default::default()
-    };
-
-    quote! {
-        pub struct #table_ident {
-            #generator_definition
-            entries: Vec<#dao_type>,
-        }
-    }
-}
-
-fn generate_msi_table_impl(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
-    let primary_key_indices = fields
-        .iter()
-        .enumerate()
-        .fold(quote! {}, |acc, (index, field)| {
-            if field.primary_key {
-                quote! { #acc #index, }
-            } else {
-                acc
-            }
-        });
-
-    let primary_keys = fields.iter().fold(quote! {}, |acc, field| {
-        if field.primary_key {
-            let field_ident = &field.ident;
-
-            // Primary key fields must implement `Into<ColumnType>`
-            quote! {
-                #acc
-                self.#field_ident.into(),
-            }
-        } else {
-            acc
-        }
-    });
-
-    let columns = fields.iter().fold(quote! {}, |acc, field| {
-        let field_ident = &field.ident.clone().expect("Field doesn't have an identifier");
-
-        let column_name = if let Some(column_name) = &field.column_name {column_name} else { &helper::snake_case_to_pascal_case(&field_ident.to_string())};
-        let nullable = if let syn::Type::Path(path) = &field.ty &&
-                 path.path.segments.last().unwrap().ident == "Option" {
-                    quote!{.nullable()}
-                }
-            else {
-                Default::default()
-            };
-
-        let primary_key = if field.primary_key {
-            quote!{.primary_key()}
-        } else {
-            Default::default()
-        };
-        let localizable = if field.localizable {
-            quote!{.localizable()}
-        } else {
-            Default::default()
-        };
-
-        // If this causes issues it can probably be removed.
-        let foreign_key = if let Some(identifier_options) = &field.identifier_options &&
-            let Some(foreign_key) = &identifier_options.foreign_key {
-            // TODO: This is almost certainly wrong in some circumstance. It assumes that the
-            // foreign_key points to the first column of the referenced table. I really want to add
-            // a way to dynamically get the primary_key index for the given table, but I would need
-            // to split the parsing into 2 sections for that. I might circle back and implement
-            // that at some point but I'm gonna skip it for now.
-            quote!{.foreign_key(#foreign_key, 0)}
-        } else {
-            Default::default()
-        };
-
-        // TODO: I dislike having to hard code in the `msi` path here but couldn't find a
-        // better solution. Should probably look into it some more.
-        let field_category = &field.category;
-        let category = quote! { .category( #field_category ) };
-        let finish = generate_finish_build_for_field(field);
-
-        quote! {
-            #acc
-
-            msi::Column::build(#column_name) #primary_key #nullable #localizable #foreign_key #category #finish,
-        }
-    });
-
-    let table_name = table_from_name(target_name);
-    let dao_name = dao_from_name(target_name);
-
-    quote! {
-        impl MsiTable for #table_name {
-            type TableValue = #dao_name;
-
-            fn name(&self) -> &'static str {
-                #target_name
-            }
-
-            fn entries(&self) -> &Vec<#dao_name> {
-                &self.entries
-            }
-
-            fn entries_mut(&mut self) -> &mut Vec<#dao_name> {
-                &mut self.entries
-            }
-
-            fn primary_key_indices(&self) -> Vec<usize> {
-                vec![#primary_key_indices]
-            }
-
-            fn primary_keys(&self) -> Vec<msi::ColumnType> {
-                vec![#primary_keys]
-            }
-
-            fn columns(&self) -> Vec<msi::Column> {
-                vec![
-                    #columns
-                ]
-            }
-        }
-    }
-}
-
-fn generate_finish_build_for_field(field: &FieldInformation) -> TokenStream {
-    let syn::Expr::Path(ref path) = field.category else {
-        panic!("Category is not a valid syn::Expr::Path.")
-    };
-    let category_str = path
-        .path
-        .segments
-        .last()
-        .expect("Path contains no segments")
-        .ident
-        .to_string();
-    let category = msi::Category::from_str(&category_str)
-        .unwrap_or_else(|_| panic!("Category is invalid: {}", category_str));
-    match category {
-        msi::Category::Integer => quote! {.int16()},
-        msi::Category::DoubleInteger => quote! {.int32()},
-        _ => {
-            let length = &field.length;
-            quote! {.string(#length)}
-        }
-    }
-}
-
-fn dao_from_name(target_name: &str) -> Ident {
-    format_ident!("{target_name}{DAO_SUFFIX}")
-}
-
-fn table_from_name(target_name: &str) -> Ident {
-    format_ident!("{target_name}{TABLE_SUFFIX}")
-}
-
-fn identifier_from_name(target_name: &str) -> Ident {
-    format_ident!("{target_name}{IDENTIFIER_SUFFIX}")
-}
-
-fn identifier_generator_from_name(target_name: &str) -> Ident {
-    let identifier = identifier_from_name(target_name);
-    format_ident!("{identifier}{GENERATOR_SUFFIX}")
 }
 
 #[cfg(test)]

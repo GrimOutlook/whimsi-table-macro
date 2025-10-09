@@ -16,9 +16,12 @@ use syn::parse_macro_input;
 
 extern crate proc_macro;
 
-mod constants;
-mod helper;
+pub(crate) mod constants;
+pub(crate) mod dao;
+pub(crate) mod helper;
+pub(crate) mod identifier;
 mod msi_tables;
+pub(crate) mod table;
 
 #[proc_macro]
 pub fn msi_table_list(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
