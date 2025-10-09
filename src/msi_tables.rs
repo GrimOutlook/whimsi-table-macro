@@ -12,7 +12,7 @@ use crate::constants::*;
 use crate::helper;
 
 #[derive(FromDeriveInput, Clone)]
-#[darling(attributes(msitable))]
+#[darling(attributes(msi_table))]
 struct DeriveInformation {
     ident: syn::Ident,
     data: darling::ast::Data<VariantInformation, FieldInformation>,
@@ -31,7 +31,7 @@ struct VariantInformation {
 }
 
 #[derive(FromField, Clone)]
-#[darling(attributes(msitable))]
+#[darling(attributes(msi_column))]
 struct FieldInformation {
     // -- Builtins ------------------------------------------------------------
     // Field name
@@ -316,7 +316,7 @@ fn generate_dao_struct_definition(
         }
     }
     quote! {
-        struct #dao_struct_ident {
+        pub struct #dao_struct_ident {
             #field_tokens
         }
     }
@@ -329,7 +329,7 @@ fn generate_primary_identifier_impl_definition(
     let dao_primary_identifier = match primary_identifier {
         Some(identifier) => {
             let identifier_ident = identifier.ident.clone();
-            quote! { Some( #identifier_ident.to_identifier() ) }
+            quote! { Some( self.#identifier_ident.to_identifier() ) }
         }
         None => {
             quote! { None }
@@ -396,7 +396,7 @@ fn generate_msi_dao_to_row_definition(fields: &Vec<FieldInformation>) -> TokenSt
         let field_ident = &field.ident;
         fields_to_msi_value_tokens = quote! {
             #fields_to_msi_value_tokens
-            msi::ToValue::to_value(#field_ident),
+            msi::ToValue::to_value(self.#field_ident),
         }
     }
 
@@ -435,7 +435,7 @@ fn generate_table_definition(target_name: &str, fields: &[FieldInformation]) -> 
     };
 
     quote! {
-        struct #table_ident {
+        pub struct #table_ident {
             #generator_definition
             entries: Vec<#dao_type>,
         }
@@ -461,7 +461,7 @@ fn generate_msi_table_impl(target_name: &str, fields: &[FieldInformation]) -> To
             // Primary key fields must implement `Into<ColumnType>`
             quote! {
                 #acc
-                #field_ident.into(),
+                self.#field_ident.into(),
             }
         } else {
             acc
@@ -594,485 +594,4 @@ fn identifier_generator_from_name(target_name: &str) -> Ident {
 }
 
 #[cfg(test)]
-mod test {
-    use crate::msi_tables;
-    use pretty_assertions::assert_eq;
-    use quote::ToTokens;
-    use quote::quote;
-
-    #[test]
-    fn test_msi_table_with_generated_identifier() {
-        let input = quote! {
-            #[MsiTable]
-            #[msitable(name = "Directory")]
-            struct DirectoryDao {
-                #[msitable(primary_key, identifier(generated), category = msi::Category::Identifier, length = 72)]
-                directory: DirectoryIdentifier,
-                #[msitable(identifier(foreign_key = "Directory"), column_name = "Directory_Parent", category = msi::Category::Identifier, length = 72)]
-                parent_directory: Option<DirectoryIdentifier>,
-                #[msitable(localizable, category = msi::Category::DefaultDir, length = 255)]
-                default_dir: DefaultDir,
-            }
-        };
-
-        // Call the macro's internal function
-        let output = msi_tables::gen_tables_impl(input);
-
-        let expected_output = quote! {
-            use whimsi_lib::types::column::identifier::Identifier;
-            use whimsi_lib::types::column::identifier::ToIdentifier;
-            use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-
-            #[doc = "This is a simple wrapper around `Identifier` for the `DirectoryTable`. Used to ensure that identifiers for the `DirectoryTable` are only used in valid locations."]
-            pub struct DirectoryIdentifier(Identifier);
-
-            impl ToIdentifier for DirectoryIdentifier {
-                fn to_identifier(&self) -> Identifier {
-                    self.0
-                }
-            }
-
-            impl std::str::FromStr for DirectoryIdentifier {
-                type Err = anyhow::Error;
-
-                fn from_str(s: &str) -> anyhow::Result<Self> {
-                    Ok(Self(Identifier::from_str(s)?))
-                }
-            }
-
-            #[derive(Debug, Clone, Default, PartialEq)]
-            pub(crate) struct DirectoryIdentifierGenerator {
-                count: usize,
-                // A reference to a vec of all used Identifiers that should not be generated again.
-                // These are all identifiers that inhabit a primary_key column.
-                used: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>,
-            }
-
-            impl IdentifierGenerator for DirectoryIdentifierGenerator {
-                type IdentifierType = DirectoryIdentifier;
-
-                fn id_prefix(&self) -> &str {
-                    "DIRECTORY"
-                }
-
-                fn used(&self) -> &std::rc::Rc<std::cell::RefCell<Vec<Identifier>>> {
-                    &self.used
-                }
-
-                fn count(&self) -> usize {
-                    self.count
-                }
-
-                fn count_mut(&mut self) -> &mut usize {
-                    &mut self.count
-                }
-            }
-
-            impl From<std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>> for DirectoryIdentifierGenerator {
-                fn from(value: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>) -> Self {
-                    let count = value.borrow().len();
-                    Self {
-                        used: value,
-                        count: 0,
-                    }
-                }
-            }
-
-            struct DirectoryDao {
-                directory: DirectoryIdentifier,
-                parent_directory: Option<DirectoryIdentifier>,
-                default_dir: DefaultDir,
-            }
-
-            impl PrimaryIdentifier for DirectoryDao {
-                fn primary_identifier(&self) -> Option<Identifier> {
-                    Some( directory.to_identifier() )
-                }
-            }
-
-            impl MsiDao for DirectoryDao {
-
-                fn conflicts_with(&self, other: &Self) -> bool {
-                    self.directory == other.directory
-                }
-
-                fn to_row(&self) -> Vec<msi::Value> {
-                    vec![
-                        msi::ToValue::to_value(directory),
-                        msi::ToValue::to_value(parent_directory),
-                        msi::ToValue::to_value(default_dir),
-                    ]
-                }
-            }
-
-            struct DirectoryTable {
-                generator: DirectoryIdentifierGenerator,
-                entries: Vec<DirectoryDao>,
-            }
-
-            impl MsiTable for DirectoryTable {
-                type TableValue = DirectoryDao;
-
-                fn name(&self) -> &'static str {
-                    "Directory"
-                }
-
-                fn entries(&self) -> &Vec<DirectoryDao> {
-                    &self.entries
-                }
-
-                fn entries_mut(&mut self) -> &mut Vec<DirectoryDao> {
-                    &mut self.entries
-                }
-
-                fn primary_key_indices(&self) -> Vec<usize> {
-                    vec![0usize,]
-                }
-
-                fn primary_keys(&self) -> Vec<msi::ColumnType> {
-                    vec![directory.into(),]
-                }
-
-                fn columns(&self) -> Vec<msi::Column> {
-                    vec![
-                        msi::Column::build("Directory").primary_key().category(msi::Category::Identifier).string(72),
-                        msi::Column::build("Directory_Parent").nullable().foreign_key("Directory", 0).category(msi::Category::Identifier).string(72),
-                        msi::Column::build("DefaultDir").localizable().category(msi::Category::DefaultDir).string(255),
-                    ]
-                }
-            }
-
-        };
-
-        // Compare the generated output with the expected output (e.g., using syn and comparing ASTs)
-        let parsed_output =
-            syn::parse2::<syn::File>(output).expect("Failed to parse output of test data");
-        let parsed_expected =
-            syn::parse2::<syn::File>(expected_output).expect("Failed to parse reference test data");
-
-        assert_eq!(
-            parsed_output.to_token_stream().to_string(),
-            parsed_expected.to_token_stream().to_string()
-        );
-    }
-
-    #[test]
-    fn test_msi_table_without_generated_identifier() {
-        let input = quote! {
-            #[MsiTable]
-            #[msitable(name = "FeatureComponent")]
-            struct FeatureComponentDao {
-                #[msitable(primary_key, identifier(foreign_key = "Feature"), category = msi::Category::Identifier, length = 72)]
-                feature_: FeatureIdentifier,
-                #[msitable(primary_key, identifier(foreign_key = "Component"), category = msi::Category::Identifier, length = 72)]
-                component_: ComponentIdentifier,
-            }
-        };
-
-        // Call the macro's internal function
-        let output = msi_tables::gen_tables_impl(input);
-
-        let expected_output = quote! {
-            use whimsi_lib::types::column::identifier::Identifier;
-            use whimsi_lib::types::column::identifier::ToIdentifier;
-            use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-
-            struct FeatureComponentDao {
-                feature_: FeatureIdentifier,
-                component_: ComponentIdentifier,
-            }
-
-            impl PrimaryIdentifier for FeatureComponentDao {
-                fn primary_identifier(&self) -> Option<Identifier> {
-                    None
-                }
-            }
-
-            impl MsiDao for FeatureComponentDao {
-
-                fn conflicts_with(&self, other: &Self) -> bool {
-                    self.feature_ == other.feature_ && self.component_ == other.component_
-                }
-
-                fn to_row(&self) -> Vec<msi::Value> {
-                    vec![
-                        msi::ToValue::to_value(feature_),
-                        msi::ToValue::to_value(component_),
-                    ]
-                }
-            }
-
-            struct FeatureComponentTable {
-                entries: Vec<FeatureComponentDao>,
-            }
-
-            impl MsiTable for FeatureComponentTable {
-                type TableValue = FeatureComponentDao;
-
-                fn name(&self) -> &'static str {
-                    "FeatureComponent"
-                }
-
-                fn entries(&self) -> &Vec<FeatureComponentDao> {
-                    &self.entries
-                }
-
-                fn entries_mut(&mut self) -> &mut Vec<FeatureComponentDao> {
-                    &mut self.entries
-                }
-
-                fn primary_key_indices(&self) -> Vec<usize> {
-                    vec![0usize,1usize,]
-                }
-
-                fn primary_keys(&self) -> Vec<msi::ColumnType> {
-                    vec![feature_.into(),component_.into(),]
-                }
-
-                fn columns(&self) -> Vec<msi::Column> {
-                    vec![
-                        msi::Column::build("Feature_").primary_key().foreign_key("Feature", 0).category(msi::Category::Identifier).string(72),
-                        msi::Column::build("Component_").primary_key().foreign_key("Component", 0).category(msi::Category::Identifier).string(72),
-                    ]
-                }
-            }
-
-        };
-
-        // Compare the generated output with the expected output (e.g., using syn and comparing ASTs)
-        let parsed_output =
-            syn::parse2::<syn::File>(output).expect("Failed to parse output of test data");
-        let parsed_expected =
-            syn::parse2::<syn::File>(expected_output).expect("Failed to parse reference test data");
-
-        assert_eq!(
-            parsed_output.to_token_stream().to_string(),
-            parsed_expected.to_token_stream().to_string()
-        );
-    }
-
-    #[test]
-    fn test_msi_tables_enum() {
-        let input = quote! {
-            #[MsiTable]
-            enum MsiTables {
-                Directory {
-                    #[msitable(primary_key, identifier(generated), category = msi::Category::Identifier, length = 72)]
-                    directory: DirectoryIdentifier,
-                    #[msitable(identifier(foreign_key = "Directory"), column_name = "Directory_Parent", category = msi::Category::Identifier, length = 72)]
-                    parent_directory: Option<DirectoryIdentifier>,
-                    #[msitable(localizable, category = msi::Category::DefaultDir, length = 255)]
-                    default_dir: DefaultDir,
-                },
-
-                FeatureComponent {
-                    #[msitable(primary_key, identifier(foreign_key = "Feature"), category = msi::Category::Identifier, length = 72)]
-                    feature_: FeatureIdentifier,
-                    #[msitable(primary_key, identifier(foreign_key = "Component"), category = msi::Category::Identifier, length = 72)]
-                    component_: ComponentIdentifier,
-                }
-            }
-        };
-
-        // Call the macro's internal function
-        let output = msi_tables::gen_tables_impl(input);
-
-        let expected_output = quote! {
-            use whimsi_lib::types::column::identifier::Identifier;
-            use whimsi_lib::types::column::identifier::ToIdentifier;
-            use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
-
-            pub enum MsiTables {
-                Directory(DirectoryTable),
-                FeatureComponent(FeatureComponentTable),
-            }
-
-            #[doc = "This is a simple wrapper around `Identifier` for the `DirectoryTable`. Used to ensure that identifiers for the `DirectoryTable` are only used in valid locations."]
-            pub struct DirectoryIdentifier(Identifier);
-
-            impl ToIdentifier for DirectoryIdentifier {
-                fn to_identifier(&self) -> Identifier {
-                    self.0
-                }
-            }
-            impl std::str::FromStr for DirectoryIdentifier {
-                type Err = anyhow::Error;
-
-                fn from_str(s: &str) -> anyhow::Result<Self> {
-                    Ok(Self(Identifier::from_str(s)?))
-                }
-            }
-
-            #[derive(Debug, Clone, Default, PartialEq)]
-            pub(crate) struct DirectoryIdentifierGenerator {
-                count: usize,
-                // A reference to a vec of all used Identifiers that should not be generated again.
-                // These are all identifiers that inhabit a primary_key column.
-                used: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>,
-            }
-
-            impl IdentifierGenerator for DirectoryIdentifierGenerator {
-                type IdentifierType = DirectoryIdentifier;
-
-                fn id_prefix(&self) -> &str {
-                    "DIRECTORY"
-                }
-
-                fn used(&self) -> &std::rc::Rc<std::cell::RefCell<Vec<Identifier>>> {
-                    &self.used
-                }
-
-                fn count(&self) -> usize {
-                    self.count
-                }
-
-                fn count_mut(&mut self) -> &mut usize {
-                    &mut self.count
-                }
-            }
-
-            impl From<std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>> for DirectoryIdentifierGenerator {
-                fn from(value: std::rc::Rc<std::cell::RefCell<Vec<Identifier>>>) -> Self {
-                    let count = value.borrow().len();
-                    Self {
-                        used: value,
-                        count: 0,
-                    }
-                }
-            }
-
-            struct DirectoryDao {
-                directory: DirectoryIdentifier,
-                parent_directory: Option<DirectoryIdentifier>,
-                default_dir: DefaultDir,
-            }
-
-            impl PrimaryIdentifier for DirectoryDao {
-                fn primary_identifier(&self) -> Option<Identifier> {
-                    Some( directory.to_identifier() )
-                }
-            }
-
-            impl MsiDao for DirectoryDao {
-
-                fn conflicts_with(&self, other: &Self) -> bool {
-                    self.directory == other.directory
-                }
-
-                fn to_row(&self) -> Vec<msi::Value> {
-                    vec![
-                        msi::ToValue::to_value(directory),
-                        msi::ToValue::to_value(parent_directory),
-                        msi::ToValue::to_value(default_dir),
-                    ]
-                }
-            }
-
-            struct DirectoryTable {
-                generator: DirectoryIdentifierGenerator,
-                entries: Vec<DirectoryDao>,
-            }
-
-            impl MsiTable for DirectoryTable {
-                type TableValue = DirectoryDao;
-                fn name(&self) -> &'static str {
-                    "Directory"
-                }
-
-                fn entries(&self) -> &Vec<DirectoryDao> {
-                    &self.entries
-                }
-
-                fn entries_mut(&mut self) -> &mut Vec<DirectoryDao> {
-                    &mut self.entries
-                }
-                fn primary_key_indices(&self) -> Vec<usize> {
-                    vec![0usize,]
-                }
-
-                fn primary_keys(&self) -> Vec<msi::ColumnType> {
-                    vec![directory.into(),]
-                }
-
-                fn columns(&self) -> Vec<msi::Column> {
-                    vec![
-                        msi::Column::build("Directory").primary_key().category(msi::Category::Identifier).string(72),
-                        msi::Column::build("Directory_Parent").nullable().foreign_key("Directory", 0).category(msi::Category::Identifier).string(72),
-                        msi::Column::build("DefaultDir").localizable().category(msi::Category::DefaultDir).string(255),
-                    ]
-                }
-            }
-
-            struct FeatureComponentDao {
-                feature_: FeatureIdentifier,
-                component_: ComponentIdentifier,
-            }
-
-            impl PrimaryIdentifier for FeatureComponentDao {
-                fn primary_identifier(&self) -> Option<Identifier> {
-                    None
-                }
-            }
-
-            impl MsiDao for FeatureComponentDao {
-
-                fn conflicts_with(&self, other: &Self) -> bool {
-                    self.feature_ == other.feature_ && self.component_ == other.component_
-                }
-
-                fn to_row(&self) -> Vec<msi::Value> {
-                    vec![
-                        msi::ToValue::to_value(feature_),
-                        msi::ToValue::to_value(component_),
-                    ]
-                }
-            }
-
-            struct FeatureComponentTable {
-                entries: Vec<FeatureComponentDao>,
-            }
-
-            impl MsiTable for FeatureComponentTable {
-                type TableValue = FeatureComponentDao;
-
-                fn name(&self) -> &'static str {
-                    "FeatureComponent"
-                }
-
-                fn entries(&self) -> &Vec<FeatureComponentDao> {
-                    &self.entries
-                }
-
-                fn entries_mut(&mut self) -> &mut Vec<FeatureComponentDao> {
-                    &mut self.entries
-                }
-
-                fn primary_key_indices(&self) -> Vec<usize> {
-                    vec![0usize,1usize,]
-                }
-
-                fn primary_keys(&self) -> Vec<msi::ColumnType> {
-                    vec![feature_.into(),component_.into(),]
-                }
-
-                fn columns(&self) -> Vec<msi::Column> {
-                    vec![
-                        msi::Column::build("Feature_").primary_key().foreign_key("Feature", 0).category(msi::Category::Identifier).string(72),
-                        msi::Column::build("Component_").primary_key().foreign_key("Component", 0).category(msi::Category::Identifier).string(72),
-                    ]
-                }
-            }
-        };
-
-        // Compare the generated output with the expected output (e.g., using syn and comparing ASTs)
-        let parsed_output = syn::parse2::<syn::File>(output.clone())
-            .unwrap_or_else(|_| panic!("Failed to parse output of test data:\n{}", output));
-        let parsed_expected =
-            syn::parse2::<syn::File>(expected_output).expect("Failed to parse reference test data");
-
-        assert_eq!(
-            parsed_output.to_token_stream().to_string(),
-            parsed_expected.to_token_stream().to_string()
-        );
-    }
-}
+mod tests;

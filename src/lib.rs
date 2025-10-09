@@ -1,11 +1,3 @@
-use syn::parse_macro_input;
-
-extern crate proc_macro;
-
-mod constants;
-mod helper;
-mod msi_tables;
-
 // NOTE: Objectives that this macro must handle:
 // - Create a valid Table object from the given inputs.
 //     - Determine what the stored datatypes are.
@@ -20,9 +12,23 @@ mod msi_tables;
 //     - Determine which columns must have unique values for each row in the table.
 //     - Determine which columns must be unique accross the MSI.
 //     - Allow custom implementations for insertion into certain tables.
+use syn::parse_macro_input;
 
-#[proc_macro_derive(MsiTables, attributes(msitable))]
-pub fn gen_tables_macro(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+extern crate proc_macro;
+
+mod constants;
+mod helper;
+mod msi_tables;
+
+#[proc_macro]
+pub fn msi_table_list(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input);
     msi_tables::gen_tables_impl(input).into()
+}
+
+// The `gen_tables_impl` function handles both enums and structs so we can call it for both single
+// table generation and multi table generation.
+#[proc_macro]
+pub fn msi_table(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    msi_table_list(input)
 }
