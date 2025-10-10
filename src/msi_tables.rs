@@ -99,7 +99,6 @@ pub fn gen_tables_impl(input: TokenStream) -> TokenStream {
     quote! {
         use whimsi_lib::types::column::identifier::Identifier;
         use whimsi_lib::types::column::identifier::ToIdentifier;
-        use whimsi_lib::types::helpers::id_generator::IdentifierGenerator;
 
         #output_tokens
     }
@@ -123,10 +122,13 @@ fn gen_tables_for_enum(name: &str, items: Vec<VariantInformation>) -> TokenStrea
     let table_enum_name = format_ident!("{name}");
     let dao_enum_name = dao_from_name(name);
     let tokens = quote! {
+        #[derive(Clone, PartialEq, strum::EnumDiscriminants, derive_more::Into, derive_more::From, derive_more::TryFrom, derive_more::TryInto, strum::Display)]
+        #[strum_discriminants(name(MsiTable))]
         pub enum #table_enum_name {
             #(#struct_variants)*
         }
 
+        #[derive(Clone, PartialEq)]
         pub enum #dao_enum_name {
             #(#dao_variants)*
         }

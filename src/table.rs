@@ -5,44 +5,21 @@ use std::str::FromStr;
 use crate::{helper::*, msi_tables::FieldInformation};
 
 pub fn generate_table_tokens(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
-    let table_definition_tokens = generate_table_definition(target_name, fields);
+    let table_definition_tokens = generate_table_definition(target_name);
     let msi_table_impl_tokens = generate_msi_table_impl(target_name, fields);
-    let identifier_generator_table_impl_tokens = if fields
-        .iter()
-        .filter_map(|f| f.identifier_options.clone())
-        .any(|f| f.generated)
-    {
-        generate_identifier_generator_table_impl(target_name)
-    } else {
-        Default::default()
-    };
     quote! {
         #table_definition_tokens
         #msi_table_impl_tokens
-        #identifier_generator_table_impl_tokens
     }
 }
 
-fn generate_table_definition(target_name: &str, fields: &[FieldInformation]) -> TokenStream {
+fn generate_table_definition(target_name: &str) -> TokenStream {
     let table_ident = table_from_name(target_name);
     let dao_type = dao_from_name(target_name);
-    let generator_definition = if fields
-        .iter()
-        .filter_map(|f| f.identifier_options.clone())
-        .any(|i| i.generated)
-    {
-        let generator_type = identifier_generator_from_name(target_name);
-        quote! {
-            generator: #generator_type,
-        }
-    } else {
-        Default::default()
-    };
 
     quote! {
         #[derive(Clone, Debug, PartialEq)]
         pub struct #table_ident {
-            #generator_definition
             entries: Vec<#dao_type>,
         }
     }
@@ -59,20 +36,6 @@ fn generate_msi_table_impl(target_name: &str, fields: &[FieldInformation]) -> To
                 acc
             }
         });
-
-    let primary_keys = fields.iter().fold(quote! {}, |acc, field| {
-        if field.primary_key {
-            let field_ident = &field.ident;
-
-            // Primary key fields must implement `Into<ColumnType>`
-            quote! {
-                #acc
-                self.#field_ident.into(),
-            }
-        } else {
-            acc
-        }
-    });
 
     let columns = fields.iter().fold(quote! {}, |acc, field| {
         let field_ident = &field.ident.clone().expect("Field doesn't have an identifier");
@@ -146,10 +109,6 @@ fn generate_msi_table_impl(target_name: &str, fields: &[FieldInformation]) -> To
                 vec![#primary_key_indices]
             }
 
-            fn primary_keys(&self) -> Vec<msi::ColumnType> {
-                vec![#primary_keys]
-            }
-
             fn columns(&self) -> Vec<msi::Column> {
                 vec![
                     #columns
@@ -183,18 +142,6 @@ fn generate_finish_build_for_field(field: &FieldInformation) -> TokenStream {
                 )
             });
             quote! {.string(#length)}
-        }
-    }
-}
-
-fn generate_identifier_generator_table_impl(target_name: &str) -> TokenStream {
-    let table_name = table_from_name(target_name);
-    let generator_name = identifier_generator_from_name(target_name);
-    quote! {
-        impl IdentifierGeneratorTable for #table_name {
-            fn generator_mut(&mut self) -> &mut #generator_name {
-                &mut self.generator
-            }
         }
     }
 }
